@@ -302,3 +302,6 @@ main form button[type="submit"] { justify-self: start; margin-top: .8rem; }
 	background: var(--warn-bg); border-left: 4px solid var(--warn-border); border-radius: 0 6px 6px 0;
 }
 .cfg-warnings[hidden] { display: none; }
+
+[hidden] { display: none !important; }
+.cfg-template { margin-top: .8rem; }

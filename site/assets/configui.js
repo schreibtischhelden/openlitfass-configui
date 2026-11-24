@@ -144,6 +144,7 @@
 				case 'int': value = raw === '' ? undefined : parseInt(raw, 10); break;
 				case 'number': value = raw === '' ? undefined : Number(raw); break;
 				case 'list': value = splitList(raw); break;
+				case 'intlist': value = splitList(raw).map((n) => parseInt(n, 10)).filter((n) => !isNaN(n)); break;
 				case 'icon': value = parseIcon(raw).paths; break;
 				case 'bool': value = raw.length ? true : undefined; break;
 				case 'choices': value = raw.slice(); break;
@@ -167,7 +168,8 @@
 			}
 			const value = getPath(obj, d.key || d.name);
 			switch (d.type) {
-				case 'list': setValue(root, d.name, Array.isArray(value) ? value.join(', ') : value); break;
+				case 'list':
+				case 'intlist': setValue(root, d.name, Array.isArray(value) ? value.join(', ') : value); break;
 				case 'icon': setValue(root, d.name, Array.isArray(value) ? value.join('\n') : value); break;
 				case 'bool': setValue(root, d.name, value === true ? fields(root, d.name).map((c) => c.value) : []); break;
 				case 'choices': setValue(root, d.name, Array.isArray(value) ? value : []); break;
@@ -252,6 +254,10 @@
 		form.insertAdjacentElement('afterend', container);
 		decorate(form, opts.descs);
 
+		function labelOf(item, i) {
+			return (opts.label ? opts.label(item) : item[opts.key]) || '#' + (i + 1);
+		}
+
 		function stopEditing() {
 			editing = -1;
 			form.reset();
@@ -287,7 +293,7 @@
 					const content = c.render(item);
 					return el('td', {}, [typeof content === 'string' ? content : content || '']);
 				});
-				const label = item[opts.key] || '#' + (i + 1);
+				const label = labelOf(item, i);
 				const actions = el('td', { class: 'cfg-row-actions' }, [
 					button('Edit', () => {
 						editing = i;
@@ -326,7 +332,7 @@
 			// keys this form does not know (from an imported file) are kept
 			const known = topKeys(opts.descs);
 			Object.keys(previous).forEach((key) => { if (known.indexOf(key) < 0) item[key] = previous[key]; });
-			const clash = items.findIndex((other, i) => i !== editing && other[opts.key] === item[opts.key]);
+			const clash = opts.key ? items.findIndex((other, i) => i !== editing && other[opts.key] === item[opts.key]) : -1;
 			if (clash >= 0) {
 				message.textContent = 'There is already an entry “' + item[opts.key] + '”.';
 				return;
@@ -339,7 +345,7 @@
 			if (editing >= 0) items[editing] = item;
 			else items.push(item);
 			stopEditing();
-			message.textContent = 'Saved “' + item[opts.key] + '”.';
+			message.textContent = 'Saved “' + labelOf(item, items.indexOf(item)) + '”.';
 			changed();
 			const first = form.querySelector('input, textarea, select');
 			if (first) first.focus();
@@ -501,6 +507,11 @@
 			top.appendChild(button('Import an existing file…', () => fileInput.click()));
 			top.appendChild(document.createTextNode(' or start with an empty form. Your input is kept in this browser until you start over.'));
 		}
+
+		ctx.load = (obj) => {
+			load(obj);
+			ctx.refresh();
+		};
 
 		// the forms are only edited live; Enter in a single-field form must not do anything
 		main.addEventListener('mdp:form-submit', (event) => event.preventDefault());
@@ -818,6 +829,296 @@
 				if (r.from && RE.monthDay.test(r.from) && !r.until) p.push('A season (MM-DD) needs Until.');
 				(r.dates || []).concat(r.except || []).forEach((day) => { if (!DAY.test(day)) p.push('“' + day + '” is not a day (YYYY-MM-DD, MM-DD, *-DD, easter±N or a day list).'); });
 				if (!r.weekdays && !r.dates) p.push('A recurring event needs weekdays or additional dates.');
+			}
+			return p;
+		},
+	};
+
+	/* ---------- sources/<name>.json ---------- */
+
+	const TYPES = ['ical', 'rss', 'json', 'html', 'wcs'];
+	// sections of the page (heading ids) and the types they apply to
+	const SOURCE_SECTIONS = {
+		'options-for-icalendar-and-wcs': ['ical', 'wcs'],
+		'options-for-wcs': ['wcs'],
+		'options-for-json': ['json'],
+		'options-for-html': ['html'],
+		'field-mapping': ['rss', 'json', 'html'],
+	};
+	const SOURCE_COMMON = [
+		{ name: 'type', key: 'type' },
+		{ name: 'url', key: 'url', placeholder: 'https://example.org/events.ics', hint: 'The feed, API or page to fetch; for wcs the site’s base URL.' },
+		{ name: 'label', key: 'label', placeholder: 'Freilichtbühne Weißensee', hint: 'Display name, shown as “Quelle: …” and on the About page.' },
+		{ name: 'homepage', key: 'homepage', placeholder: 'https://example.org', hint: 'The organiser’s website, linked in the list of sources.' },
+		{ name: 'source_name', key: 'name', hint: 'Stable identifier in logs, metrics and events.json. Default: the file name; usually leave it empty.' },
+		{ name: 'priority', key: 'priority', type: 'int', placeholder: '0', hint: 'Which version wins when sources overlap: the venue’s own source higher (e.g. 10) than an aggregator (0 or negative).' },
+		{ name: 'source_disabled', key: 'disabled', type: 'bool', hint: 'Skip the source without deleting the file.' },
+	];
+	const SOURCE_FILTERS = [
+		{ name: 'days_ahead', key: 'daysAhead', type: 'int', attrs: { min: '1' }, placeholder: '60', hint: 'Keep only events up to N days ahead. wcs: request window (default 30); ical: recurrences are expanded this far (default 180).' },
+		{ name: 'place', key: 'place', placeholder: 'brotfabrik', hint: 'Link every event to this place of places.json (id or ref); for sources with a single venue.' },
+		{ name: 'allowed_categories', key: 'categories', type: 'list', placeholder: 'Kultur, Markt', hint: 'Comma-separated allowlist, applied after the category map. Empty: keep all.' },
+	];
+	const SOURCE_BY_TYPE = {
+		ical: [
+			{ name: 'organizer', key: 'organizer', placeholder: 'Beispiel-Bühne', hint: 'ical: used when an event has no ORGANIZER. wcs: organiser of every event.' },
+			{ name: 'default_location', key: 'locationDefault', placeholder: 'Beispiel-Bühne, Musterstraße 5, 12345 Berlin', hint: 'Venue for events without one: “Venue, Street 1, 12345 City”.' },
+			{ name: 'family-friendly', key: 'familyFriendly', type: 'bool', hint: 'Mark every event of this source as family-friendly.' },
+		],
+		wcs: [
+			{ name: 'wcs_type_ids', key: 'wcsTypeIds', type: 'intlist', placeholder: '27, 28, 29, 30', hint: 'Comma-separated. The content[wcs_type][] values of the admin-ajax.php request in the browser’s Network tab. Without them the plugin’s demo classes come along.' },
+		],
+		json: [
+			{ name: 'items_path', key: 'itemsPath', placeholder: 'data.items', hint: 'Dot path to the array of events in the response; empty if the response is the array.' },
+			{ name: 'next_page_path', key: 'nextPath', placeholder: 'next_rest_url', hint: 'Dot path to the URL of the next page, for paginated APIs.' },
+			{ name: 'max_pages', key: 'maxPages', type: 'int', attrs: { min: '1' }, placeholder: '10', hint: 'Page limit. Default: 10.' },
+		],
+		html: [
+			{ name: 'item_selector', key: 'itemSelector', placeholder: '#events .event', hint: 'CSS selector of one event container.' },
+			{ name: 'section_selector', key: 'sectionSelector', placeholder: 'h3.program_date1', hint: 'Optional: headings that group the entries after them; their text is the value “section”.' },
+		],
+	};
+	SOURCE_BY_TYPE.wcs = SOURCE_BY_TYPE.ical.concat(SOURCE_BY_TYPE.wcs);
+	const EXTRACT = [
+		{ name: 'value_name', key: 'name', placeholder: 'title', hint: 'The name used as path in the field mapping.' },
+		{ name: 'selector', key: 'selector', placeholder: 'h2 a', hint: 'Relative to the event container; empty = the container itself. Supported: tag, .class, #id, [attr], [attr=value], :first-of-type, :nth-of-type(n), “a b”, “a > b”.' },
+		{ name: 'attribute', key: 'attr', placeholder: 'href', hint: 'An attribute instead of the text; relative URLs are resolved.' },
+		{ name: 'extract_options', type: 'flags', flags: { 'inner HTML': 'html', 'all matches': 'all' }, hint: 'Inner HTML keeps the paragraphs of a description; all matches joins every match instead of the first.' },
+		{ name: 'skip', key: 'skip', type: 'int', attrs: { min: '0' }, hint: 'With all matches: skip the first N.' },
+		{ name: 'regex', key: 'regex', placeholder: '(\\d{1,2}:\\d{2})', hint: 'Go syntax. The group “value”, otherwise all groups joined, otherwise the whole match.' },
+	];
+	const EXTRACT_ORDER = ['selector', 'attr', 'html', 'all', 'skip', 'regex'];
+	const TARGETS = ['sourceId', 'title', 'description', 'category', 'organizer', 'url', 'locationName', 'locationAddress', 'placeRef', 'start', 'end', 'date', 'startTime', 'endTime', 'price', 'ticketRequired', 'registrationRequired', 'familyFriendly', 'cancelled'];
+	const BOOL_TARGETS = ['ticketRequired', 'registrationRequired', 'familyFriendly', 'cancelled'];
+	const RULE = [
+		{ name: 'target_field', key: 'target' },
+		{ name: 'path', key: 'path', placeholder: 'location.title', hint: 'JSON: dot path into one item (tags.0 = first tag). RSS: tag name in lower case (content:encoded → encoded). HTML: a value name from above, or section.' },
+		{ name: 'template', key: 'template', placeholder: '{street}, {zip} {city}', hint: 'Instead of a path: combine several values; {a|b} takes the first non-empty one.' },
+		{ name: 'regex', key: 'regex', hint: 'Extract part of the value (Go syntax).' },
+		{ name: 'format', key: 'format', placeholder: '2 Jan 2006 15:04|2 Jan 2006', hint: 'start and end only: Go time layout or RFC3339, RFC1123Z, RFC1123; several separated by |.' },
+		{ name: 'default', key: 'default', hint: 'Used when path or template yields nothing.' },
+		{ name: 'equals', key: 'equals', placeholder: 'cancelled|canceled', hint: 'Attributes (ticketRequired, registrationRequired, familyFriendly, cancelled) only: texts that count as true.' },
+	];
+	const RULE_ORDER = ['path', 'regex', 'format', 'default', 'template'];
+	const PRICE = [
+		{ name: 'amount_path', key: 'amountPath', placeholder: 'price.amount', hint: 'Path to the amount in euros, also as text; 0 or missing = free.' },
+		{ name: 'free_path', key: 'freePath', hint: 'Path to an explicit Boolean “free”; takes precedence.' },
+		{ name: 'price_unknown', key: 'unknownIfMissing', type: 'bool', hint: 'A missing amount means “price unknown” instead of free.' },
+		{ name: 'amount_regex', key: 'amountRegex', placeholder: '(?i)eintritt\\W{0,3}(frei)|(\\d+(?:,\\d+)?)\\s*€', hint: 'Extract the amount from free text at the amount path; “frei” counts as free.' },
+	];
+	const CATEGORY_MAP = [
+		{ name: 'source_category', key: 'from', placeholder: 'Konzert', hint: 'The source’s category name; matched case-insensitively.' },
+		{ name: 'instance_category', key: 'to', placeholder: 'Kultur', hint: 'One of the instance’s categories.' },
+	];
+	const MATCH = [
+		{ name: 'rule', key: 'kind' },
+		{ name: 'field', key: 'field' },
+		{ name: 'pattern', key: 'regex', placeholder: '(?i)weißensee|1308[68]', hint: 'Go syntax; (?i) makes it case-insensitive.' },
+	];
+	const SOURCE_ORDER = ['name', 'label', 'homepage', 'priority', 'type', 'url', 'disabled', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'daysAhead', 'categories', 'include', 'exclude', 'wcsTypeIds', 'organizer', 'locationDefault', 'categoryMap', 'familyFriendly', 'place'];
+
+	// the example instance's templates (sources/*.example.json)
+	const SOURCE_TEMPLATES = {
+		ical: { label: 'Beispiel-Bühne', homepage: 'https://example.org', type: 'ical', url: 'https://example.org/events.ics', daysAhead: 120, organizer: 'Beispiel-Bühne', locationDefault: 'Beispiel-Bühne, Musterstraße 5', categoryMap: { Konzert: 'Kultur', Theater: 'Kultur' } },
+		rss: { label: 'Beispiel-Kulturzentrum', homepage: 'https://example.org', type: 'rss', url: 'https://example.org/events/feed', mapping: { sourceId: { path: 'guid' }, title: { path: 'title' }, description: { path: 'description' }, url: { path: 'link' }, category: { path: 'category', default: 'Kultur' }, organizer: { default: 'Beispiel-Kulturzentrum' }, locationName: { default: 'Beispiel-Kulturzentrum' }, start: { path: 'pubdate', format: 'RFC1123Z' } } },
+		json: { label: 'Beispiel-Veranstaltungs-API', homepage: 'https://example.org', type: 'json', url: 'https://example.org/api/events', itemsPath: 'data.items', daysAhead: 60, mapping: { sourceId: { path: 'id' }, title: { path: 'name' }, description: { path: 'text' }, url: { path: 'detailUrl' }, category: { path: 'tags.0', default: 'Unkategorisiert' }, organizer: { path: 'organizer.name' }, locationName: { path: 'location.title' }, locationAddress: { path: 'location.address' }, start: { path: 'startDateTime', format: '2006-01-02T15:04:05Z07:00' }, end: { path: 'endDateTime', format: '2006-01-02T15:04:05Z07:00' }, price: { amountPath: 'price.amount' } } },
+		html: { label: 'Beispiel-Stadtteilzentrum', homepage: 'https://example.org', type: 'html', url: 'https://example.org/veranstaltungen.html', itemSelector: '#events .event', extract: { day: '.date .day', month: '.date .month', year: '.date .year', title: 'h2', category: 'a.category', link: { selector: 'h2 a', attr: 'href' }, start: { selector: 'p.time', regex: '(\\d{1,2}:\\d{2})' }, end: { selector: 'p.time', regex: '-\\s*(\\d{1,2}:\\d{2})' }, place: 'p.place', description: { selector: 'p', all: true, skip: 2, html: true } }, mapping: { title: { path: 'title' }, description: { path: 'description' }, category: { path: 'category' }, url: { path: 'link', default: 'https://example.org/veranstaltungen.html' }, locationName: { path: 'place', default: 'Beispiel-Stadtteilzentrum' }, locationAddress: { default: 'Musterstraße 23, 10115 Berlin' }, start: { template: '{day} {month} {year} {start}', format: '2 Jan 2006 15:04|2 Jan 2006' }, end: { template: '{day} {month} {year} {end}', format: '2 Jan 2006 15:04' } }, daysAhead: 60 },
+		wcs: { label: 'Beispiel-Familienzentrum', homepage: 'https://example.org', type: 'wcs', url: 'https://example.org', daysAhead: 30, organizer: 'Beispiel-Familienzentrum', locationDefault: 'Beispiel-Familienzentrum, Musterstraße 1', wcsTypeIds: [1, 2, 3], familyFriendly: true, categoryMap: { bewegung: 'Sport', kreatives: 'Kultur' } },
+	};
+
+	function ordered(obj, order) {
+		const out = {};
+		order.forEach((key) => { if (key in obj) out[key] = obj[key]; });
+		Object.keys(obj).forEach((key) => { if (!(key in out)) out[key] = obj[key]; });
+		return out;
+	}
+
+	function sourceType(ctx) {
+		const type = getValue(ctx.main, 'type');
+		return TYPES.indexOf(type) >= 0 ? type : 'ical';
+	}
+
+	/* shows the sections of the chosen type: a heading and everything up to
+	   the next heading of the same or a higher level */
+	function showSections(main, type) {
+		Object.keys(SOURCE_SECTIONS).forEach((id) => {
+			const heading = document.getElementById(id);
+			if (!heading || !main.contains(heading)) return;
+			const hidden = SOURCE_SECTIONS[id].indexOf(type) < 0;
+			const level = Number(heading.tagName.slice(1));
+			heading.hidden = hidden;
+			for (let node = heading.nextElementSibling; node; node = node.nextElementSibling) {
+				if (/^H[1-6]$/.test(node.tagName) && Number(node.tagName.slice(1)) <= level) break;
+				node.hidden = hidden;
+			}
+		});
+	}
+
+	function sourceFields(type) {
+		return SOURCE_COMMON.concat(SOURCE_BY_TYPE[type] || [], SOURCE_FILTERS);
+	}
+
+	SPECS.source = {
+		folder: 'sources/',
+		file: (obj, ctx) => (fileStem(getValue(ctx.main, 'file_name')) || 'source') + '.json',
+		keys: () => SOURCE_ORDER,
+		drop: ['status'],
+		init: (ctx) => {
+			const all = [];
+			[SOURCE_COMMON, SOURCE_BY_TYPE.wcs, SOURCE_BY_TYPE.json, SOURCE_BY_TYPE.html, SOURCE_FILTERS].forEach((list) => list.forEach((d) => { if (all.indexOf(d) < 0) all.push(d); }));
+			ctx.allFields = all;
+			decorate(ctx.main, all.concat([{ name: 'file_name', hint: 'Without .json. The file name is the source name unless “Source name” is set; keep it stable.' }]));
+			ctx.extract = listEditor(ctx, {
+				anchor: 'value_name', descs: EXTRACT, key: 'name',
+				empty: 'No values yet. Add one per piece of information: title, date, time, link, …',
+				columns: [
+					{ label: 'Name', render: (x) => el('code', { text: x.name }) },
+					{ label: 'Selector', render: (x) => x.selector || '(container)' },
+					{ label: 'Details', render: (x) => ['attr', 'html', 'all', 'skip', 'regex'].filter((k) => x[k] !== undefined).map((k) => (x[k] === true ? k : k + ' ' + x[k])).join(', ') },
+				],
+				check: (x) => (/^[\w.-]+$/.test(x.name) ? '' : 'Use letters, digits, “_”, “-” and “.” for the name.'),
+			});
+			ctx.rules = listEditor(ctx, {
+				anchor: 'target_field', descs: RULE, key: 'target',
+				empty: 'No rules yet. An event needs at least a title and a date (start, or date).',
+				columns: [
+					{ label: 'Field', render: (r) => el('code', { text: r.target }) },
+					{ label: 'Rule', render: (r) => ['path', 'template', 'regex', 'format', 'default', 'equals'].filter((k) => r[k] !== undefined).map((k) => k + ': ' + r[k]).join(' · ') },
+				],
+				check: (r) => {
+					if (r.target === 'price') return 'Use the form “Price” below for the price.';
+					const bool = BOOL_TARGETS.indexOf(r.target) >= 0;
+					if (bool && (r.template || r.regex || r.format || r.default)) return 'Attributes only take a path and “equals”.';
+					if (!bool && r.equals) return '“equals” is only for attributes.';
+					if (r.format && ['start', 'end'].indexOf(r.target) < 0) return '“format” is only for start and end.';
+					if (!r.path && !r.template && !r.default) return 'Give a path, a template or a default.';
+					return '';
+				},
+			});
+			ctx.categoryMap = listEditor(ctx, {
+				anchor: 'source_category', descs: CATEGORY_MAP, key: 'from',
+				empty: 'No translations. Unmapped categories are kept as they are.',
+				columns: [
+					{ label: 'Source', render: (m) => m.from },
+					{ label: 'Instance', render: (m) => m.to || '' },
+				],
+				check: (m) => (m.to ? '' : 'Give the instance’s category.'),
+			});
+			ctx.matches = listEditor(ctx, {
+				anchor: 'pattern', descs: MATCH, key: null,
+				label: (m) => m.kind + ' ' + m.field + ' ' + m.regex,
+				empty: 'No rules: every event is kept.',
+				columns: [
+					{ label: 'Rule', render: (m) => m.kind },
+					{ label: 'Field', render: (m) => m.field },
+					{ label: 'Regex', render: (m) => el('code', { text: m.regex || '' }) },
+				],
+			});
+			ctx.auto = autoFill(ctx.main, 'label', 'file_name', () => slug(getValue(ctx.main, 'label')));
+			const typeSelect = field(ctx.main, 'type');
+			typeSelect.addEventListener('change', () => showSections(ctx.main, sourceType(ctx)));
+			typeSelect.form.addEventListener('reset', () => setTimeout(() => showSections(ctx.main, sourceType(ctx))));
+			const bar = el('p', { class: 'cfg-template' }, [button('Fill in the example for this type', () => {
+				const type = sourceType(ctx);
+				if (getValue(ctx.main, 'url') && !window.confirm('Replace the current fields with the example for “' + type + '”?')) return;
+				ctx.load(JSON.parse(JSON.stringify(SOURCE_TEMPLATES[type])));
+				setValue(ctx.main, 'file_name', '');
+				ctx.auto.reset();
+				field(ctx.main, 'label').dispatchEvent(new Event('input', { bubbles: true }));
+			})]);
+			typeSelect.form.appendChild(bar);
+			showSections(ctx.main, sourceType(ctx));
+		},
+		build: (ctx) => {
+			const type = sourceType(ctx);
+			const obj = readObject(ctx.main, sourceFields(type));
+			obj.type = type;
+			if (type === 'html') {
+				const extract = {};
+				ctx.extract.items().forEach((x) => {
+					const rule = ordered(Object.assign({}, x), EXTRACT_ORDER);
+					delete rule.name;
+					const keys = Object.keys(rule);
+					extract[x.name] = keys.length === 1 && keys[0] === 'selector' ? rule.selector : rule;
+				});
+				if (!isEmpty(extract)) obj.extract = extract;
+			}
+			if (['rss', 'json', 'html'].indexOf(type) >= 0) {
+				const mapping = {};
+				ctx.rules.items().forEach((r) => {
+					const rule = ordered(Object.assign({}, r), BOOL_TARGETS.indexOf(r.target) >= 0 ? ['path', 'equals'] : RULE_ORDER);
+					delete rule.target;
+					mapping[r.target] = rule;
+				});
+				const price = readObject(formOf(ctx.main, 'amount_path'), PRICE);
+				if (!isEmpty(price)) mapping.price = price;
+				if (!isEmpty(mapping)) obj.mapping = ordered(mapping, TARGETS);
+			}
+			const include = [];
+			const exclude = [];
+			ctx.matches.items().forEach((m) => (m.kind === 'exclude' ? exclude : include).push({ field: m.field, regex: m.regex }));
+			if (include.length) obj.include = include;
+			if (exclude.length) obj.exclude = exclude;
+			const map = {};
+			ctx.categoryMap.items().forEach((m) => { map[m.from] = m.to; });
+			if (!isEmpty(map)) obj.categoryMap = map;
+			return ordered(obj, SOURCE_ORDER);
+		},
+		load: (ctx, obj) => {
+			writeObject(ctx.main, ctx.allFields, obj);
+			if (TYPES.indexOf(obj.type) < 0) setValue(ctx.main, 'type', 'ical');
+			ctx.extract.set(Object.keys(obj.extract || {}).map((name) => {
+				const rule = obj.extract[name];
+				return Object.assign({ name: name }, typeof rule === 'string' ? { selector: rule } : rule);
+			}));
+			const mapping = obj.mapping || {};
+			ctx.rules.set(Object.keys(mapping).filter((t) => t !== 'price').map((t) => Object.assign({ target: t }, mapping[t])));
+			writeObject(formOf(ctx.main, 'amount_path'), PRICE, mapping.price || {});
+			ctx.categoryMap.set(Object.keys(obj.categoryMap || {}).map((from) => ({ from: from, to: obj.categoryMap[from] })));
+			ctx.matches.set((obj.include || []).map((m) => Object.assign({ kind: 'include' }, m)).concat((obj.exclude || []).map((m) => Object.assign({ kind: 'exclude' }, m))));
+			showSections(ctx.main, sourceType(ctx));
+		},
+		meta: (ctx) => ({ file: getValue(ctx.main, 'file_name') }),
+		restore: (ctx, meta) => {
+			if (meta.file) {
+				setValue(ctx.main, 'file_name', meta.file);
+				ctx.auto.keep();
+			}
+		},
+		imported: (ctx, name) => {
+			setValue(ctx.main, 'file_name', fileStem(name));
+			ctx.auto.keep();
+		},
+		cleared: (ctx) => ctx.auto.reset(),
+		validate: (obj, ctx) => {
+			const p = [];
+			const stem = fileStem(getValue(ctx.main, 'file_name'));
+			if (!stem) p.push('Give the file a name.');
+			else if (!/^[A-Za-z0-9_.-]+$/.test(stem)) p.push('The file name should only contain letters, digits, “-”, “_” and “.”.');
+			if (/\.example$/i.test(stem)) p.push('Files ending in .example.json are templates and are not loaded.');
+			if (!obj.url) p.push('The URL is required.');
+			else if (!RE.url.test(obj.url)) p.push('The URL must start with https:// (or http://).');
+			if (obj.homepage && !RE.url.test(obj.homepage)) p.push('The homepage must be an absolute URL.');
+			if (obj.type === 'wcs' && !obj.wcsTypeIds) p.push('wcs: without type IDs the plugin also returns its demo classes.');
+			if (obj.type === 'wcs' && obj.url && /admin-ajax/.test(obj.url)) p.push('wcs: the URL is the site’s base URL, not the admin-ajax.php endpoint.');
+			if (obj.type === 'html' && !obj.itemSelector) p.push('html: the item selector is required.');
+			if (obj.type === 'html' && (!obj.extract || isEmpty(obj.extract))) p.push('html: add the values to read from each event (extract).');
+			if (obj.itemSelector && /,/.test(obj.itemSelector)) p.push('Selector lists (“,”) are not supported.');
+			if (['rss', 'json', 'html'].indexOf(obj.type) >= 0) {
+				const m = obj.mapping || {};
+				if (!m.title) p.push('The field mapping needs a rule for title.');
+				if (!m.start && !m.date) p.push('The field mapping needs a rule for start (or date).');
+				if (obj.type === 'rss' && m.start && m.start.path === 'pubdate') p.push('rss: pubDate is often the date of the post, not of the event. Check a few entries against the website.');
+				if (obj.type === 'html' && obj.extract) {
+					const names = Object.keys(obj.extract).concat(obj.sectionSelector ? ['section'] : []);
+					Object.keys(m).forEach((target) => {
+						const rule = m[target];
+						const refs = [];
+						if (rule.path) refs.push(rule.path);
+						(rule.template || '').replace(/\{([^}]+)\}/g, (all, inner) => { inner.split('|').forEach((n) => refs.push(n.trim())); return all; });
+						refs.forEach((ref) => { if (names.indexOf(ref) < 0) p.push(target + ': “' + ref + '” is not one of the extracted values.'); });
+					});
+				}
 			}
 			return p;
 		},

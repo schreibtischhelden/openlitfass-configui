@@ -13,6 +13,7 @@ them into your instance directory.
 <a href="?page=categories"><strong>categories.json</strong>Categories, their icons and groups.</a>
 <a href="?page=places"><strong>places.json</strong>Place types and places for the tab “Orte”.</a>
 <a href="?page=inbox"><strong>Inbox event</strong>A single or recurring event added by hand.</a>
+<a href="?page=source"><strong>Source</strong>An iCalendar, RSS, JSON, HTML or WordPress source with its field mapping and filters.</a>
 </div>
 
 ## How it works
