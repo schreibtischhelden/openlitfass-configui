@@ -10,6 +10,9 @@
 
 	const page = new URLSearchParams(window.location.search).get('page') || '';
 	const DRAFT_PREFIX = 'ol-config-draft:';
+	const BOUND_PREFIX = 'ol-config-bound:';
+	const TABLER_URL = 'https://github.com/tabler/tabler-icons';
+	const WS = window.OLWorkspace;
 	const SPECS = {};
 	window.OLConfig = { specs: SPECS };
 
@@ -275,6 +278,7 @@
 		}
 
 		function changed() {
+			ctx.touched = true;
 			render();
 			if (opts.onChange) opts.onChange(items);
 			ctx.refresh();
@@ -311,7 +315,8 @@
 					button('↑', () => move(i, i - 1), 'cfg-link'),
 					button('↓', () => move(i, i + 1), 'cfg-link'),
 					button('Remove', () => {
-						if (!window.confirm('Remove “' + label + '”?')) return;
+						const note = opts.removeNote ? opts.removeNote(item) : '';
+						if (!window.confirm('Remove “' + label + '”?' + (note ? '\n\n' + note : ''))) return;
 						items.splice(i, 1);
 						if (editing === i) stopEditing();
 						else if (editing > i) editing--;
@@ -342,10 +347,13 @@
 				message.textContent = problem;
 				return;
 			}
+			const oldKey = editing >= 0 && opts.key ? previous[opts.key] : undefined;
 			if (editing >= 0) items[editing] = item;
 			else items.push(item);
 			stopEditing();
-			message.textContent = 'Saved “' + labelOf(item, items.indexOf(item)) + '”.';
+			let note = '';
+			if (oldKey !== undefined && oldKey !== item[opts.key] && opts.onRename) note = opts.onRename(oldKey, item[opts.key], items) || '';
+			message.textContent = 'Saved “' + labelOf(item, items.indexOf(item)) + '”.' + (note ? ' ' + note : '');
 			changed();
 			const first = form.querySelector('input, textarea, select');
 			if (first) first.focus();
@@ -353,6 +361,7 @@
 
 		render();
 		return {
+			render: render,
 			items: () => items.slice(),
 			set: (list) => {
 				items.length = 0;
@@ -369,7 +378,14 @@
 		const area = field(root, name);
 		if (!area) return;
 		const preview = el('div', { class: 'cfg-icon-preview', 'aria-live': 'polite' });
-		(area.nextElementSibling && area.nextElementSibling.classList.contains('cfg-hint') ? area.nextElementSibling : area).insertAdjacentElement('afterend', preview);
+		const tools = el('p', { class: 'cfg-icon-tools' }, [
+			'Icons: ',
+			el('a', { href: TABLER_URL, target: '_blank', rel: 'noopener', text: 'Tabler Icons' }),
+			' (outline, MIT Licence). Copy the SVG of an icon and paste it here.',
+		]);
+		const after = area.nextElementSibling && area.nextElementSibling.classList.contains('cfg-hint') ? area.nextElementSibling : area;
+		after.insertAdjacentElement('afterend', tools);
+		tools.insertAdjacentElement('afterend', preview);
 		const update = () => {
 			const icon = parseIcon(area.value);
 			preview.textContent = '';
@@ -386,7 +402,9 @@
 	/* ---------- the page: output, import, draft ---------- */
 
 	function setUp(main, spec) {
-		const ctx = { main: main, extras: {}, refresh: () => {} };
+		/* ctx.bound: the path of the file in the loaded instance that this
+		   page edits; changes made by the user are saved there. */
+		const ctx = { main: main, extras: {}, refresh: () => {}, bound: null, touched: false };
 		const out = main.querySelector('[data-cfg-output]');
 		const code = el('code');
 		const warnings = el('ul', { class: 'cfg-warnings' });
@@ -422,6 +440,18 @@
 				const obj = current();
 				code.textContent = JSON.stringify(obj, null, 2) + '\n';
 				const problems = spec.validate ? spec.validate(obj, ctx) : [];
+				if (ctx.bound && ctx.touched) {
+					const target = (spec.folder || '') + fileName(obj);
+					if (target !== ctx.bound && WS.has(target)) {
+						problems.unshift('“' + target + '” already exists in the loaded instance. Choose another file name; until then the changes are not saved there.');
+					} else {
+						if (target !== ctx.bound) {
+							WS.move(ctx.bound, target);
+							bind(target);
+						}
+						WS.save(ctx.bound, obj, spec.drop);
+					}
+				}
 				warnings.textContent = '';
 				problems.forEach((p) => warnings.appendChild(el('li', { text: p })));
 				warnings.hidden = !problems.length;
@@ -448,7 +478,8 @@
 				}
 				load(obj);
 				if (spec.imported) spec.imported(ctx, file.name);
-				status.textContent = 'Loaded ' + file.name + '.';
+				status.textContent = 'Loaded ' + file.name + '.' + (ctx.bound ? ' It replaces ' + ctx.bound + ' in the loaded instance.' : '');
+				ctx.touched = true;
 				ctx.refresh();
 			};
 			reader.readAsText(file);
@@ -482,12 +513,16 @@
 			}),
 			button('Import a file…', () => fileInput.click()),
 			button('Start over', () => {
-				if (!window.confirm('Clear all fields of this page?')) return;
+				const wasBound = ctx.bound;
+				if (!window.confirm('Clear all fields of this page?' + (wasBound ? ' ' + wasBound + ' in the loaded instance stays as it is.' : ''))) return;
 				try { localStorage.removeItem(DRAFT_PREFIX + page); } catch (e) {}
+				bind(null);
 				load({});
 				if (spec.cleared) spec.cleared(ctx);
-				status.textContent = 'All fields cleared.';
+				status.textContent = 'All fields cleared.' + (wasBound ? ' ' + wasBound + ' in the loaded instance is unchanged.' : '');
+				ctx.touched = false;
 				ctx.refresh();
+				renderBar();
 			}),
 			status,
 			fileInput,
@@ -501,32 +536,250 @@
 			out.appendChild(actions);
 		}
 
+		/* ----- the loaded instance ----- */
+
+		const multi = !!spec.folder;
+
+		function bind(path) {
+			ctx.bound = path;
+			try {
+				if (path) localStorage.setItem(BOUND_PREFIX + page, path);
+				else localStorage.setItem(BOUND_PREFIX + page, '');
+			} catch (e) {}
+		}
+
+		function storedBinding() {
+			try { return localStorage.getItem(BOUND_PREFIX + page); } catch (e) { return null; }
+		}
+
+		function openFromInstance(path) {
+			const obj = WS.get(path);
+			if (!obj) {
+				status.textContent = path + ' in the loaded instance is not valid JSON; fix it in an editor first.';
+				return false;
+			}
+			bind(path);
+			load(obj);
+			if (spec.imported) spec.imported(ctx, path.split('/').pop());
+			ctx.touched = false;
+			ctx.refresh();
+			return true;
+		}
+
+		function addToInstance() {
+			const obj = current();
+			const path = (spec.folder || '') + fileName(obj);
+			if (WS.has(path) && !window.confirm(path + ' already exists in the loaded instance. Replace it?')) return;
+			bind(path);
+			ctx.touched = true;
+			WS.save(path, obj);
+			status.textContent = 'Added ' + path + ' to the loaded instance.';
+			ctx.refresh();
+			renderBar();
+		}
+
 		const top = main.querySelector('[data-cfg-import]');
-		if (top) {
+		function renderBar() {
+			if (!top) return;
+			top.textContent = '';
 			top.classList.add('cfg-import');
-			top.appendChild(button('Import an existing file…', () => fileInput.click()));
-			top.appendChild(document.createTextNode(' or start with an empty form. Your input is kept in this browser until you start over.'));
+			if (!WS.active()) {
+				top.appendChild(button('Import an existing file…', () => fileInput.click()));
+				top.appendChild(document.createTextNode(' or start with an empty form. Your input is kept in this browser until you start over. To check this file against the rest of your configuration, '));
+				top.appendChild(el('a', { href: '.', text: 'load your instance on the start page' }));
+				top.appendChild(document.createTextNode('.'));
+				return;
+			}
+			const name = WS.instanceName();
+			if (multi) {
+				const select = el('select', { 'aria-label': 'File in the loaded instance' }, [el('option', { value: '', text: '(a new file)' })]
+					.concat(WS.list(spec.folder).map((p) => el('option', { value: p, text: p.slice(spec.folder.length) }))));
+				select.value = ctx.bound || '';
+				select.addEventListener('change', () => {
+					if (select.value) openFromInstance(select.value);
+					else {
+						bind(null);
+						load({});
+						if (spec.cleared) spec.cleared(ctx);
+						ctx.touched = false;
+						ctx.refresh();
+					}
+					renderBar();
+				});
+				top.appendChild(el('label', { class: 'cfg-bar-label' }, ['Instance “' + name + '”, file in ' + spec.folder + ': ', select]));
+				if (ctx.bound) {
+					top.appendChild(el('span', { class: 'cfg-bar-note', text: ' Changes are saved to the loaded instance. ' }));
+					top.appendChild(button('Remove from the instance', () => {
+						if (!window.confirm('Remove ' + ctx.bound + ' from the loaded instance? The fields stay filled in.')) return;
+						WS.remove(ctx.bound);
+						status.textContent = 'Removed ' + ctx.bound + ' from the loaded instance.';
+						bind(null);
+						renderBar();
+					}, 'cfg-link cfg-danger'));
+				} else {
+					top.appendChild(document.createTextNode(' '));
+					top.appendChild(button('Add to the instance', addToInstance));
+				}
+			} else if (ctx.bound) {
+				top.appendChild(document.createTextNode('Editing ' + spec.file + ' of the loaded instance “' + name + '”; changes are saved there. '));
+			} else if (WS.has(spec.file)) {
+				top.appendChild(document.createTextNode('The loaded instance “' + name + '” has a ' + spec.file + '. '));
+				top.appendChild(button('Edit it', () => { openFromInstance(spec.file); renderBar(); }));
+			} else {
+				top.appendChild(document.createTextNode('The loaded instance “' + name + '” has no ' + spec.file + ' yet. '));
+				top.appendChild(button('Add this one', addToInstance));
+			}
+			top.appendChild(document.createTextNode(' '));
+			top.appendChild(button('Download all (ZIP)', () => downloadZip(status)));
+			top.appendChild(document.createTextNode(' '));
+			top.appendChild(el('a', { href: '.', text: 'Overview' }));
 		}
 
 		ctx.load = (obj) => {
 			load(obj);
 			ctx.refresh();
 		};
+		ctx.renderBar = renderBar;
 
 		// the forms are only edited live; Enter in a single-field form must not do anything
 		main.addEventListener('mdp:form-submit', (event) => event.preventDefault());
-		main.addEventListener('input', ctx.refresh);
-		main.addEventListener('change', ctx.refresh);
+		const edited = (event) => {
+			if (top && top.contains(event.target)) return;
+			ctx.touched = true;
+			ctx.refresh();
+		};
+		main.addEventListener('input', edited);
+		main.addEventListener('change', edited);
 
 		spec.init(ctx);
 
 		let draft = null;
 		try { draft = JSON.parse(localStorage.getItem(DRAFT_PREFIX + page) || 'null'); } catch (e) {}
-		if (draft && draft.obj && typeof draft.obj === 'object') {
-			load(draft.obj);
-			if (spec.restore && draft.meta) spec.restore(ctx, draft.meta);
+		const requested = new URLSearchParams(window.location.search).get('file');
+		const stored = storedBinding();
+		let start = null;
+		if (WS.active()) {
+			if (multi) start = [requested, requested === null ? stored : null].find((p) => p && p.indexOf(spec.folder) === 0 && WS.has(p)) || null;
+			else if (WS.has(spec.file) && stored !== '') start = spec.file;
 		}
-		ctx.refresh();
+		// a singleton page stays unbound when the user chose "Start over" on it
+		// (stored ''); otherwise it edits the instance's file
+		if (!(start && openFromInstance(start))) {
+			ctx.bound = null;
+			if (draft && draft.obj && typeof draft.obj === 'object' && !(requested && multi)) {
+				load(draft.obj);
+				if (spec.restore && draft.meta) spec.restore(ctx, draft.meta);
+			}
+			ctx.refresh();
+		}
+		renderBar();
+		WS.onChange(renderBar);
+	}
+
+	function downloadBlob(blob, name) {
+		const url = URL.createObjectURL(blob);
+		const link = el('a', { href: url, download: name });
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 1000);
+	}
+
+	function downloadZip(status) {
+		const name = slug(WS.instanceName()) || 'instance';
+		WS.zip().then((blob) => {
+			downloadBlob(blob, name + '-config.zip');
+			status.textContent = 'Downloaded ' + name + '-config.zip with ' + WS.paths().length + ' files.';
+		}, (e) => { status.textContent = e.message; });
+	}
+
+	/* the instance's categories and places, from the loaded instance or
+	   from the drafts of the categories and places pages */
+	function draftOf(name) {
+		try {
+			const draft = JSON.parse(localStorage.getItem(DRAFT_PREFIX + name) || 'null');
+			return draft && draft.obj ? draft.obj : null;
+		} catch (e) {
+			return null;
+		}
+	}
+
+	function knownCategories() {
+		const fromWs = WS.categoryNames();
+		if (fromWs) return { names: fromWs, from: 'categories.json of the loaded instance' };
+		const draft = draftOf('categories');
+		if (draft && Array.isArray(draft.categories) && draft.categories.length) {
+			return { names: draft.categories.map((c) => c.name).filter(Boolean), from: 'your categories.json draft' };
+		}
+		return null;
+	}
+
+	function knownPlaces() {
+		const fromWs = WS.placeKeys();
+		if (fromWs) return { names: fromWs, from: 'places.json of the loaded instance' };
+		const draft = draftOf('places');
+		if (draft && Array.isArray(draft.places) && draft.places.length) {
+			const keys = [];
+			draft.places.forEach((pl) => { if (pl.id) keys.push(pl.id); (pl.refs || []).forEach((r) => keys.push(r)); });
+			return { names: keys, from: 'your places.json draft' };
+		}
+		return null;
+	}
+
+	/* datalists for the category and place fields of sources and inbox events */
+	function instanceDatalists() {
+		const cats = knownCategories();
+		const places = knownPlaces();
+		datalist('cfg-instance-categories', cats ? cats.names : []);
+		datalist('cfg-instance-places', places ? places.names : []);
+	}
+
+	/* refs: [{ where, value }] -> problems against the known categories/places */
+	function refProblems(catRefs, placeRefs) {
+		const p = [];
+		const cats = knownCategories();
+		if (cats) {
+			catRefs.forEach((r) => { if (r.value && cats.names.indexOf(r.value) < 0) p.push(r.where + ': “' + r.value + '” is not a category in ' + cats.from + '; such events get the fallback icon.'); });
+		} else if (catRefs.length) {
+			p.push('The categories cannot be checked: load your instance on the start page, or fill in categories.json first.');
+		}
+		const places = knownPlaces();
+		if (places) {
+			placeRefs.forEach((r) => { if (r.value && places.names.indexOf(r.value) < 0) p.push(r.where + ': “' + r.value + '” is not an id or ref in ' + places.from + '.'); });
+		}
+		return p;
+	}
+
+	function filesUsing(refs, value) {
+		return refs.filter((r) => r.value === value).map((r) => r.path).filter((p, i, all) => all.indexOf(p) === i);
+	}
+
+	/* table cell: the files of the loaded instance that use value */
+	function usedIn(refs, value) {
+		const files = filesUsing(refs, value);
+		if (!files.length) return el('span', { class: 'cfg-muted', text: '–' });
+		return el('span', { title: files.join('\n'), text: files.length + (files.length === 1 ? ' file' : ' files') });
+	}
+
+	/* after renaming a category or place id: offers to rename it in the
+	   other files of the loaded instance; returns a note for the user */
+	function renameElsewhere(what, from, to, refs, rename) {
+		if (!WS.active()) {
+			return 'If sources or inbox events use the ' + what + ' “' + from + '”, change them to “' + to + '” as well, or load your instance on the start page to have it done for you.';
+		}
+		const files = filesUsing(refs, from);
+		if (!files.length) return '';
+		if (!window.confirm('The ' + what + ' “' + from + '” is used in ' + files.length + (files.length === 1 ? ' file' : ' files') + ' of the loaded instance:\n\n' + files.join('\n') + '\n\nRename it to “' + to + '” there as well?')) {
+			return 'Still “' + from + '” in: ' + files.join(', ') + '.';
+		}
+		const changed = rename(from, to);
+		return 'Renamed in ' + changed.length + (changed.length === 1 ? ' file' : ' files') + ': ' + changed.join(', ') + '.';
+	}
+
+	function removeNote(refs, value, consequence) {
+		if (!WS.active()) return 'Sources and inbox events that use “' + value + '” need to be changed as well. ' + consequence;
+		const files = filesUsing(refs, value);
+		return files.length ? 'It is used in: ' + files.join(', ') + '. ' + consequence : '';
 	}
 
 	/* ---------- shared validation ---------- */
@@ -600,7 +853,7 @@
 
 	const CATEGORY = [
 		{ name: 'category_name', key: 'name', placeholder: 'Kultur', hint: 'As it appears in events and in the filter.' },
-		{ name: 'icon', key: 'icon', type: 'icon', placeholder: '<svg …>…</svg>  or  M12 21a9 9 0 0 1 0 -18…', hint: 'SVG path data, one path per line, drawn in a 24 × 24 box. Or paste a whole <svg>, e.g. from tabler.io/icons.' },
+		{ name: 'icon', key: 'icon', type: 'icon', placeholder: '<svg …>…</svg>  or  M12 21a9 9 0 0 1 0 -18…', hint: 'SVG path data, one path per line, drawn in a 24 × 24 box. Or paste a whole <svg>.' },
 		{ name: 'group', key: 'group', datalist: 'cfg-categories', hint: 'Optional: another category this one belongs to (one level deep).' },
 	];
 	const CATEGORIES_TOP = [
@@ -612,16 +865,30 @@
 		keys: () => ['fallback', 'categories'],
 		init: (ctx) => {
 			decorate(ctx.main, CATEGORIES_TOP);
+			const columns = [
+				{ label: 'Icon', render: (c) => iconPreview(c.icon) },
+				{ label: 'Name', render: (c) => c.name },
+				{ label: 'Group', render: (c) => c.group || '' },
+			];
+			if (WS.active()) columns.push({ label: 'Used in', render: (c) => usedIn(WS.categoryRefs(), c.name) });
 			ctx.list = listEditor(ctx, {
 				anchor: 'category_name', descs: CATEGORY, key: 'name',
 				empty: 'No categories yet. Add the first one above.',
-				columns: [
-					{ label: 'Icon', render: (c) => iconPreview(c.icon) },
-					{ label: 'Name', render: (c) => c.name },
-					{ label: 'Group', render: (c) => c.group || '' },
-				],
+				columns: columns,
 				check: (c) => (c.group && c.group === c.name ? 'A category cannot be its own group.' : ''),
 				onChange: (items) => datalist('cfg-categories', items.map((c) => c.name)),
+				onRename: (from, to, items) => {
+					items.forEach((c) => { if (c.group === from) c.group = to; });
+					if (getValue(ctx.main, 'fallback_category') === from) setValue(ctx.main, 'fallback_category', to);
+					return renameElsewhere('category', from, to, WS.categoryRefs(), WS.renameCategory);
+				},
+				removeNote: (c) => {
+					const groups = ctx.list.items().filter((other) => other.group === c.name).map((other) => other.name);
+					const notes = [];
+					if (groups.length) notes.push('It is the group of ' + groups.join(', ') + '.');
+					notes.push(removeNote(WS.categoryRefs(), c.name, 'Events with this category then get the fallback icon.'));
+					return notes.filter(Boolean).join('\n');
+				},
 			});
 			iconField(ctx.main, 'icon');
 		},
@@ -685,17 +952,41 @@
 					{ label: 'Name', render: (t) => t.name },
 				],
 				onChange: (items) => datalist('cfg-place-types', items.map((t) => t.name)),
+				onRename: (from, to) => {
+					const places = ctx.places.items();
+					let count = 0;
+					places.forEach((pl) => { if (pl.type === from) { pl.type = to; count++; } });
+					if (count) ctx.places.render();
+					return count ? 'The type of ' + count + (count === 1 ? ' place' : ' places') + ' was changed as well.' : '';
+				},
+				removeNote: (t) => {
+					const count = ctx.places.items().filter((pl) => pl.type === t.name).length;
+					return count ? count + (count === 1 ? ' place has' : ' places have') + ' this type; give them another one afterwards.' : '';
+				},
 			});
 			iconField(ctx.main, 'type_icon');
 			let auto = null;
+			const columns = [
+				{ label: 'ID', render: (pl) => el('code', { text: pl.id }) },
+				{ label: 'Name', render: (pl) => pl.name },
+				{ label: 'Type', render: (pl) => pl.type || '' },
+			];
+			if (WS.active()) {
+				// computed once per table, not once per row
+				let refs = null;
+				columns.push({ label: 'Used in', render: (pl) => {
+					if (!refs) { refs = WS.placeRefs(); setTimeout(() => { refs = null; }); }
+					const values = [pl.id].concat(pl.refs || []);
+					const files = refs.filter((r) => values.indexOf(r.value) >= 0).map((r) => r.path).filter((p, i, all) => all.indexOf(p) === i);
+					return files.length ? el('span', { title: files.join('\n'), text: files.length + (files.length === 1 ? ' file' : ' files') }) : el('span', { class: 'cfg-muted', text: '–' });
+				} });
+			}
 			ctx.places = listEditor(ctx, {
 				anchor: 'place_name', descs: PLACE, key: 'id',
 				empty: 'No places yet.',
-				columns: [
-					{ label: 'ID', render: (pl) => el('code', { text: pl.id }) },
-					{ label: 'Name', render: (pl) => pl.name },
-					{ label: 'Type', render: (pl) => pl.type || '' },
-				],
+				columns: columns,
+				onRename: (from, to) => renameElsewhere('place id', from, to, WS.placeRefs(), WS.renamePlace),
+				removeNote: (pl) => removeNote(WS.placeRefs(), pl.id, 'Events linked to it lose the link to the place.'),
 				check: (pl) => {
 					const types = ctx.types.items().map((t) => t.name);
 					if (types.length && types.indexOf(pl.type) < 0) return 'The type “' + pl.type + '” is not one of the place types.';
@@ -740,13 +1031,13 @@
 		{ name: 'date', key: 'date', hint: 'Required for a single event; leave it empty for a recurring one.' },
 		{ name: 'start_time', key: 'startTime', hint: 'Without a start time the event is all-day.' },
 		{ name: 'end_time', key: 'endTime' },
-		{ name: 'category', key: 'category', placeholder: 'Markt', hint: 'One of the instance’s categories.' },
+		{ name: 'category', key: 'category', datalist: 'cfg-instance-categories', placeholder: 'Markt', hint: 'One of the instance’s categories.' },
 		{ name: 'description', key: 'description', placeholder: 'Trödel, Bücher und Kuchen.' },
 		{ name: 'location_name', key: 'location.name', placeholder: 'Antonplatz' },
 		{ name: 'location_address', key: 'location.address', placeholder: 'Antonplatz, 13086 Berlin' },
 		{ name: 'organizer', key: 'organizer', placeholder: 'Kiezinitiative' },
 		{ name: 'link', key: 'url', placeholder: 'https://example.org/flohmarkt' },
-		{ name: 'place', key: 'place', placeholder: 'antonplatz', hint: 'Optional: id or ref of a place in places.json.' },
+		{ name: 'place', key: 'place', datalist: 'cfg-instance-places', placeholder: 'antonplatz', hint: 'Optional: id or ref of a place in places.json.' },
 		{ name: 'marked_as', type: 'flags', flags: { 'Ticket required': 'ticketRequired', 'Registration required': 'registrationRequired', 'Family-friendly': 'familyFriendly', 'Cancelled': 'cancelled' } },
 		{ name: 'weekdays', key: 'repeat.weekdays', type: 'choices', hint: 'The days of the week on which the event takes place; needs From.' },
 		{ name: 'from', key: 'repeat.from', placeholder: '2026-10-01 or 10-01', hint: 'Start of the period: a date (YYYY-MM-DD) or, for a season that recurs every year, month and day (MM-DD).' },
@@ -770,6 +1061,7 @@
 		keys: () => INBOX_ORDER,
 		init: (ctx) => {
 			decorate(ctx.main, INBOX);
+			instanceDatalists();
 			ctx.auto = autoFill(ctx.main, 'title', 'file_name', () => {
 				const date = getValue(ctx.main, 'date');
 				return slug((date ? date + ' ' : '') + getValue(ctx.main, 'title'));
@@ -830,7 +1122,9 @@
 				(r.dates || []).concat(r.except || []).forEach((day) => { if (!DAY.test(day)) p.push('“' + day + '” is not a day (YYYY-MM-DD, MM-DD, *-DD, easter±N or a day list).'); });
 				if (!r.weekdays && !r.dates) p.push('A recurring event needs weekdays or additional dates.');
 			}
-			return p;
+			return p.concat(refProblems(
+				obj.category ? [{ where: 'Category', value: obj.category }] : [],
+				obj.place ? [{ where: 'Place', value: obj.place }] : []));
 		},
 	};
 
@@ -856,8 +1150,8 @@
 	];
 	const SOURCE_FILTERS = [
 		{ name: 'days_ahead', key: 'daysAhead', type: 'int', attrs: { min: '1' }, placeholder: '60', hint: 'Keep only events up to N days ahead. wcs: request window (default 30); ical: recurrences are expanded this far (default 180).' },
-		{ name: 'place', key: 'place', placeholder: 'brotfabrik', hint: 'Link every event to this place of places.json (id or ref); for sources with a single venue.' },
-		{ name: 'allowed_categories', key: 'categories', type: 'list', placeholder: 'Kultur, Markt', hint: 'Comma-separated allowlist, applied after the category map. Empty: keep all.' },
+		{ name: 'place', key: 'place', datalist: 'cfg-instance-places', placeholder: 'brotfabrik', hint: 'Link every event to this place of places.json (id or ref); for sources with a single venue.' },
+		{ name: 'allowed_categories', key: 'categories', type: 'list', datalist: 'cfg-instance-categories', placeholder: 'Kultur, Markt', hint: 'Comma-separated allowlist, applied after the category map. Empty: keep all.' },
 	];
 	const SOURCE_BY_TYPE = {
 		ical: [
@@ -908,7 +1202,7 @@
 	];
 	const CATEGORY_MAP = [
 		{ name: 'source_category', key: 'from', placeholder: 'Konzert', hint: 'The source’s category name; matched case-insensitively.' },
-		{ name: 'instance_category', key: 'to', placeholder: 'Kultur', hint: 'One of the instance’s categories.' },
+		{ name: 'instance_category', key: 'to', datalist: 'cfg-instance-categories', placeholder: 'Kultur', hint: 'One of the instance’s categories.' },
 	];
 	const MATCH = [
 		{ name: 'rule', key: 'kind' },
@@ -967,6 +1261,7 @@
 			const all = [];
 			[SOURCE_COMMON, SOURCE_BY_TYPE.wcs, SOURCE_BY_TYPE.json, SOURCE_BY_TYPE.html, SOURCE_FILTERS].forEach((list) => list.forEach((d) => { if (all.indexOf(d) < 0) all.push(d); }));
 			ctx.allFields = all;
+			instanceDatalists();
 			decorate(ctx.main, all.concat([{ name: 'file_name', hint: 'Without .json. The file name is the source name unless “Source name” is set; keep it stable.' }]));
 			ctx.extract = listEditor(ctx, {
 				anchor: 'value_name', descs: EXTRACT, key: 'name',
@@ -1120,15 +1415,176 @@
 					});
 				}
 			}
-			return p;
+			const catRefs = [];
+			Object.keys(obj.categoryMap || {}).forEach((from) => catRefs.push({ where: 'Category map “' + from + '”', value: obj.categoryMap[from] }));
+			(obj.categories || []).forEach((name) => catRefs.push({ where: 'Allowed categories', value: name }));
+			const mapping = obj.mapping || {};
+			if (mapping.category && mapping.category.default) catRefs.push({ where: 'Field mapping, category default', value: mapping.category.default });
+			const placeRefs = [];
+			if (obj.place) placeRefs.push({ where: 'Place', value: obj.place });
+			if (mapping.placeRef && mapping.placeRef.default) placeRefs.push({ where: 'Field mapping, placeRef default', value: mapping.placeRef.default });
+			return p.concat(refProblems(catRefs, placeRefs));
 		},
 	};
+
+	/* ---------- start page: load, check and download the instance ---------- */
+
+	const EDIT_PAGES = { 'instance.json': 'instance', 'categories.json': 'categories', 'places.json': 'places', 'sources/': 'source', 'inbox/': 'inbox' };
+
+	function editLink(path) {
+		if (EDIT_PAGES[path]) return '?page=' + EDIT_PAGES[path];
+		const folder = path.slice(0, path.indexOf('/') + 1);
+		return EDIT_PAGES[folder] ? '?page=' + EDIT_PAGES[folder] + '&file=' + encodeURIComponent(path) : '';
+	}
+
+	/* files and folders dropped onto the page: [{ path, file }] */
+	async function droppedEntries(dataTransfer) {
+		const out = [];
+		const walk = (entry, prefix) => new Promise((resolve) => {
+			if (entry.isFile) {
+				entry.file((file) => { out.push({ path: prefix + file.name, file: file }); resolve(); }, () => resolve());
+			} else if (entry.isDirectory) {
+				const reader = entry.createReader();
+				const all = [];
+				const next = () => reader.readEntries((batch) => {
+					if (!batch.length) {
+						Promise.all(all.map((child) => walk(child, prefix + entry.name + '/'))).then(resolve);
+						return;
+					}
+					all.push.apply(all, batch);
+					next();
+				}, () => resolve());
+				next();
+			} else resolve();
+		});
+		const items = Array.prototype.slice.call(dataTransfer.items || []);
+		const entries = items.map((item) => (item.webkitGetAsEntry ? item.webkitGetAsEntry() : null)).filter(Boolean);
+		if (entries.length) {
+			await Promise.all(entries.map((entry) => walk(entry, '')));
+			return { entries: out, folder: entries.some((e) => e.isDirectory) };
+		}
+		Array.prototype.forEach.call(dataTransfer.files || [], (file) => out.push({ path: file.name, file: file }));
+		return { entries: out, folder: false };
+	}
+
+	function setUpWorkspace(box) {
+		box.classList.add('cfg-workspace');
+		const status = el('p', { class: 'cfg-status', role: 'status' });
+		const folderInput = el('input', { type: 'file', multiple: '', hidden: '' });
+		folderInput.webkitdirectory = true;
+		const filesInput = el('input', { type: 'file', multiple: '', accept: '.json,.zip,application/json,application/zip', hidden: '' });
+		const content = el('div');
+
+		function forgetBindings() {
+			Object.keys(SPECS).forEach((name) => { try { localStorage.removeItem(BOUND_PREFIX + name); } catch (e) {} });
+		}
+
+		async function load(entries, wholeInstance) {
+			if (!entries.length) return;
+			const zip = entries.some((e) => /\.zip$/i.test(e.path));
+			const replace = wholeInstance || zip;
+			if (replace && WS.active() && !window.confirm('Replace the loaded instance “' + WS.instanceName() + '”? Changes that you have not downloaded are lost.')) return;
+			status.textContent = 'Reading…';
+			try {
+				const report = await WS.importEntries(entries, replace);
+				if (replace) forgetBindings();
+				const parts = [];
+				if (report.added.length) parts.push(report.added.length + (report.added.length === 1 ? ' file' : ' files') + ' loaded');
+				if (report.replaced.length) parts.push(report.replaced.length + ' replaced');
+				if (report.invalid.length) parts.push('not valid JSON: ' + report.invalid.join(', '));
+				if (report.ignored.length) parts.push('ignored (not a configuration file): ' + report.ignored.join(', '));
+				status.textContent = (parts.join('; ') || 'No configuration files found. Pick the instance folder, the one with instance.json, sources/ and inbox/.') + '.';
+			} catch (e) {
+				status.textContent = e.message;
+			}
+			render();
+		}
+
+		folderInput.addEventListener('change', () => {
+			const entries = Array.prototype.map.call(folderInput.files, (file) => ({ path: file.webkitRelativePath || file.name, file: file }));
+			folderInput.value = '';
+			load(entries, true);
+		});
+		filesInput.addEventListener('change', () => {
+			const entries = Array.prototype.map.call(filesInput.files, (file) => ({ path: file.name, file: file }));
+			filesInput.value = '';
+			load(entries, false);
+		});
+		box.addEventListener('dragover', (event) => { event.preventDefault(); box.classList.add('cfg-drop'); });
+		box.addEventListener('dragleave', () => box.classList.remove('cfg-drop'));
+		box.addEventListener('drop', (event) => {
+			event.preventDefault();
+			box.classList.remove('cfg-drop');
+			droppedEntries(event.dataTransfer).then((dropped) => load(dropped.entries, dropped.folder));
+		});
+
+		function render() {
+			content.textContent = '';
+			const actions = el('p', { class: 'cfg-actions' }, [
+				button('Load the instance folder…', () => folderInput.click(), 'cfg-button' + (WS.active() ? '' : ' cfg-primary')),
+				button('Load files or a ZIP…', () => filesInput.click()),
+				el('span', { class: 'cfg-muted', text: 'or drop them here.' }),
+			]);
+			content.appendChild(actions);
+			if (!WS.active()) return;
+
+			const paths = WS.paths();
+			const head = el('p', { class: 'cfg-workspace-head' }, [
+				el('strong', { text: 'Loaded: “' + WS.instanceName() + '”' }),
+				' – ' + paths.length + (paths.length === 1 ? ' file' : ' files') + '. ',
+			]);
+			content.appendChild(head);
+			content.appendChild(el('p', { class: 'cfg-actions' }, [
+				button('Download all (ZIP)', () => downloadZip(status), 'cfg-button cfg-primary'),
+				button('Unload', () => {
+					if (!window.confirm('Remove the loaded instance from this browser? Changes that you have not downloaded are lost. Your files on disk are not touched.')) return;
+					WS.clear();
+					forgetBindings();
+					status.textContent = 'The instance was removed from this browser.';
+					render();
+				}),
+			]));
+
+			const problems = WS.check();
+			if (problems.length) {
+				content.appendChild(el('p', { class: 'cfg-problems-head', text: problems.length + (problems.length === 1 ? ' thing needs' : ' things need') + ' your attention:' }));
+				content.appendChild(el('ul', { class: 'cfg-warnings' }, problems.map((pr) => {
+					const link = editLink(pr.path);
+					return el('li', {}, [link && WS.has(pr.path) ? el('a', { href: link, text: pr.path }) : el('code', { text: pr.path }), ' ' + pr.text]);
+				})));
+			} else {
+				content.appendChild(el('p', { class: 'cfg-ok', text: 'The categories and places used by the sources and inbox events all exist.' }));
+			}
+
+			const body = el('tbody', {}, paths.map((path) => {
+				const link = editLink(path);
+				return el('tr', {}, [
+					el('td', {}, [link ? el('a', { href: link, text: path }) : el('code', { text: path })]),
+					el('td', { class: 'cfg-row-actions' }, [button('Remove', () => {
+						if (!window.confirm('Remove ' + path + ' from the loaded instance?')) return;
+						WS.remove(path);
+						render();
+					}, 'cfg-link cfg-danger')]),
+				]);
+			}));
+			content.appendChild(el('div', { class: 'cfg-list' }, [el('table', {}, [
+				el('thead', {}, [el('tr', {}, [el('th', { scope: 'col', text: 'File' }), el('th', { scope: 'col', text: '' })])]),
+				body,
+			])]));
+		}
+
+		box.append(content, status, folderInput, filesInput);
+		render();
+	}
 
 	/* ---------- start ---------- */
 
 	document.addEventListener('mdp:rendered', (event) => {
 		if (!event.detail || event.detail.region !== 'main') return;
+		const main = document.querySelector('main');
 		const spec = SPECS[page];
-		if (spec && spec.init) setUp(document.querySelector('main'), spec);
+		if (spec && spec.init) setUp(main, spec);
+		const box = main.querySelector('[data-cfg-workspace]');
+		if (box) setUpWorkspace(box);
 	});
 })();
