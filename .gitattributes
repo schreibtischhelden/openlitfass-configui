@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.png binary
+# generated or vendored, one long line each
+site/assets/icons/tabler-outline.json -diff linguist-generated
+site/assets/lib/*.min.js -diff linguist-vendored

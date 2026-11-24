@@ -374,14 +374,22 @@
 	}
 
 	/* live icon preview below an icon textarea */
-	function iconField(root, name) {
+	function iconField(root, name, labelName) {
 		const area = field(root, name);
 		if (!area) return;
 		const preview = el('div', { class: 'cfg-icon-preview', 'aria-live': 'polite' });
+		const pick = button('Pick an icon…', () => {
+			window.OLIconPicker.open(tools, getValue(root, labelName), (paths) => {
+				area.value = paths.join('\n');
+				area.dispatchEvent(new Event('input', { bubbles: true }));
+				area.focus();
+			});
+		});
 		const tools = el('p', { class: 'cfg-icon-tools' }, [
-			'Icons: ',
+			pick,
+			' Suggestions from the name. Or copy the SVG of an icon from ',
 			el('a', { href: TABLER_URL, target: '_blank', rel: 'noopener', text: 'Tabler Icons' }),
-			' (outline, MIT Licence). Copy the SVG of an icon and paste it here.',
+			' (outline, MIT Licence) and paste it here.',
 		]);
 		const after = area.nextElementSibling && area.nextElementSibling.classList.contains('cfg-hint') ? area.nextElementSibling : area;
 		after.insertAdjacentElement('afterend', tools);
@@ -890,7 +898,7 @@
 					return notes.filter(Boolean).join('\n');
 				},
 			});
-			iconField(ctx.main, 'icon');
+			iconField(ctx.main, 'icon', 'category_name');
 		},
 		build: (ctx) => {
 			const obj = readObject(ctx.main, CATEGORIES_TOP);
@@ -964,7 +972,7 @@
 					return count ? count + (count === 1 ? ' place has' : ' places have') + ' this type; give them another one afterwards.' : '';
 				},
 			});
-			iconField(ctx.main, 'type_icon');
+			iconField(ctx.main, 'type_icon', 'type_name');
 			let auto = null;
 			const columns = [
 				{ label: 'ID', render: (pl) => el('code', { text: pl.id }) },
