@@ -26,8 +26,11 @@ site/
   assets/
     setup.js           renderer options and saved theme, before rendering
     shell.js           navigation, menu toggle, theme switch
+    workspace.js       the loaded instance: read, check, rename, ZIP
+    configui.js        page specs: form fields ↔ JSON keys
     configui.css       layout and colours
     img/               icons
+    lib/               JSZip (loaded only for ZIP files), with its licence
 scripts/
   assemble.sh          renderer + site/ → finished site
   preview.sh           local preview at http://localhost:8001 (Docker)
@@ -62,4 +65,6 @@ the branch `pages`, served by GitHub Pages at `config.openlitfass.org`.
 ## Licence
 
 MIT, see [LICENSE](LICENSE). markdown-pages.js and its libraries keep their
-own licences, which are published with the site.
+own licences, which are published with the site. [JSZip](https://github.com/Stuk/jszip)
+3.10.1 in `site/assets/lib/` is used under its MIT licence
+(`LICENSE-jszip.txt`, dual MIT/GPLv3).
