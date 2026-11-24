@@ -322,3 +322,17 @@ main form button[type="submit"] { justify-self: start; margin-top: .8rem; }
 .cfg-icon-tools { margin: .2rem 0 .4rem; font-size: .85rem; color: var(--muted); }
 .cfg-bar-label select { width: auto; display: inline-block; margin: 0 .3rem 0 0; padding: .2rem .5rem; }
 .cfg-bar-note { font-size: .9rem; }
+
+/* icon picker */
+
+.cfg-picker { margin: .4rem 0 .8rem; padding: .8rem; border: 1px solid var(--note-border); border-radius: 8px; background: var(--note-bg); }
+.cfg-picker input[type="search"] { margin-bottom: .3rem; }
+.cfg-picker-info { margin: .2rem 0 .5rem; font-size: .85rem; color: var(--muted); }
+.cfg-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr)); gap: .4rem; margin-bottom: .5rem; }
+.cfg-picker-icon {
+	display: flex; flex-direction: column; align-items: center; gap: .25rem; padding: .5rem .2rem; margin: 0;
+	background: var(--bg, transparent); color: var(--text); border: 1px solid var(--note-border); border-radius: 6px; cursor: pointer;
+}
+.cfg-picker-icon:hover, .cfg-picker-icon:focus-visible { border-color: var(--link); }
+.cfg-picker-icon .cfg-icon { width: 28px; height: 28px; }
+.cfg-picker-icon span { font-size: .7rem; line-height: 1.2; overflow-wrap: anywhere; text-align: center; color: var(--muted); }

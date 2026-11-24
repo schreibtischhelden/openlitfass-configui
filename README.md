@@ -31,9 +31,12 @@ site/
     configui.css       layout and colours
     img/               icons
     lib/               JSZip (loaded only for ZIP files), with its licence
+    iconpicker.js      icon picker with German search words
+    icons/             Tabler Icons index (outline, no brands), with its licence
 scripts/
   assemble.sh          renderer + site/ → finished site
   preview.sh           local preview at http://localhost:8001 (Docker)
+  build-icon-index.mjs builds site/assets/icons/ from @tabler/icons
 .github/workflows/pages.yml
 ```
 
@@ -67,4 +70,12 @@ the branch `pages`, served by GitHub Pages at `config.openlitfass.org`.
 MIT, see [LICENSE](LICENSE). markdown-pages.js and its libraries keep their
 own licences, which are published with the site. [JSZip](https://github.com/Stuk/jszip)
 3.10.1 in `site/assets/lib/` is used under its MIT licence
-(`LICENSE-jszip.txt`, dual MIT/GPLv3).
+(`LICENSE-jszip.txt`, dual MIT/GPLv3). The icon index in `site/assets/icons/`
+is built from [Tabler Icons](https://github.com/tabler/tabler-icons) 3.52.0
+(MIT, `LICENSE-tabler-icons.txt`); brand icons are left out.
+
+## Updating the icons
+
+`scripts/build-icon-index.mjs` rebuilds the index from an unpacked
+`@tabler/icons` package; its header shows how to run it in Docker. Commit
+the result: neither the build nor the browser fetch icons from elsewhere.
