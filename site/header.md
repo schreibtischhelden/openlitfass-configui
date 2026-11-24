@@ -4,3 +4,7 @@
 #### Config files
 
 - [Start](.)
+- [instance.json](?page=instance)
+- [categories.json](?page=categories)
+- [places.json](?page=places)
+- [Inbox event](?page=inbox)

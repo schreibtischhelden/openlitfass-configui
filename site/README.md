@@ -8,6 +8,13 @@ them into your instance directory.
 > files are put together on this page. Imported files are only read
 > locally.
 
+<div class="cards">
+<a href="?page=instance"><strong>instance.json</strong>Name, texts, time zone, colour and links of the instance.</a>
+<a href="?page=categories"><strong>categories.json</strong>Categories, their icons and groups.</a>
+<a href="?page=places"><strong>places.json</strong>Place types and places for the tab “Orte”.</a>
+<a href="?page=inbox"><strong>Inbox event</strong>A single or recurring event added by hand.</a>
+</div>
+
 ## How it works
 
 1. Pick a file in the sidebar.
