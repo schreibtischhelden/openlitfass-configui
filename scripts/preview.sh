@@ -1,7 +1,8 @@
 #!/bin/sh
 # Local preview at http://localhost:8001: clones markdown-pages.js into
 # .renderer/ (once; delete the folder to update it), assembles the site into
-# .preview/ and serves it with a static web server in Docker.
+# .preview/ (with the source presets of ../openlitfass, if present) and
+# serves it with a static web server in Docker.
 #
 #   scripts/preview.sh            assemble and serve
 #   scripts/preview.sh assemble   assemble only (after editing site/)
@@ -13,7 +14,10 @@ cd "$root"
 if [ ! -d .renderer ]; then
   git clone -q --depth 1 https://github.com/schreibtischhelden/markdown-pages.js .renderer
 fi
-scripts/assemble.sh .renderer .preview
+# The presets come from the core next to this repository, if it is there.
+core=""
+if [ -d ../openlitfass/backend/internal/config/presets ]; then core=../openlitfass; fi
+scripts/assemble.sh .renderer .preview $core
 
 if [ "${1:-}" = assemble ]; then
   exit 0

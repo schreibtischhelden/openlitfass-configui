@@ -44,8 +44,18 @@ jobs:
           path: .renderer
           persist-credentials: false
 
+      # The source presets of the core, as they are on its main branch at
+      # the time of the run (like the renderer above).
+      - name: Check out the core's source presets
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: schreibtischhelden/openlitfass
+          path: .core
+          sparse-checkout: backend/internal/config/presets
+          persist-credentials: false
+
       - name: Assemble site
-        run: scripts/assemble.sh .renderer "$RUNNER_TEMP/site"
+        run: scripts/assemble.sh .renderer "$RUNNER_TEMP/site" .core
 
       - name: Publish to branch pages
         run: |

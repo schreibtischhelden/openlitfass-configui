@@ -1217,7 +1217,7 @@
 		{ name: 'field', key: 'field' },
 		{ name: 'pattern', key: 'regex', placeholder: '(?i)weißensee|1308[68]', hint: 'Go syntax; (?i) makes it case-insensitive.' },
 	];
-	const SOURCE_ORDER = ['name', 'label', 'homepage', 'priority', 'type', 'url', 'disabled', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'daysAhead', 'categories', 'include', 'exclude', 'wcsTypeIds', 'organizer', 'locationDefault', 'categoryMap', 'familyFriendly', 'place'];
+	const SOURCE_ORDER = ['name', 'label', 'homepage', 'priority', 'preset', 'params', 'type', 'url', 'disabled', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'daysAhead', 'categories', 'include', 'exclude', 'wcsTypeIds', 'organizer', 'locationDefault', 'categoryMap', 'familyFriendly', 'place'];
 
 	// the example instance's templates (sources/*.example.json)
 	const SOURCE_TEMPLATES = {
@@ -1240,20 +1240,55 @@
 		return TYPES.indexOf(type) >= 0 ? type : 'ical';
 	}
 
+	/* the chosen preset's name, '' for none */
+	function presetName(ctx) {
+		const name = getValue(ctx.main, 'preset');
+		return name && name !== 'none' ? name : '';
+	}
+
+	// keys a preset-based file keeps as they are: the preset provides them,
+	// the file may override them, the preset form doesn't edit them
+	const PRESET_KEEP = ['type', 'url', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'wcsTypeIds', 'organizer', 'locationDefault', 'familyFriendly'];
+
+	/* the presets shipped with the core, copied into assets/presets/ when the
+	   site is assembled (scripts/assemble.sh) */
+	function loadPresets() {
+		const get = (path) => fetch(path, { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(path + ': ' + r.status))));
+		return get('assets/presets/index.json')
+			.then((names) => Promise.all(names.map((name) => get('assets/presets/' + encodeURIComponent(name) + '.json').then((p) => Object.assign(p, { name: name })))))
+			.catch(() => []);
+	}
+
+	function showSection(main, id, hidden) {
+		const heading = document.getElementById(id);
+		if (!heading || !main.contains(heading)) return;
+		const level = Number(heading.tagName.slice(1));
+		heading.hidden = hidden;
+		for (let node = heading.nextElementSibling; node; node = node.nextElementSibling) {
+			if (/^H[1-6]$/.test(node.tagName) && Number(node.tagName.slice(1)) <= level) break;
+			node.hidden = hidden;
+		}
+	}
+
 	/* shows the sections of the chosen type: a heading and everything up to
-	   the next heading of the same or a higher level */
-	function showSections(main, type) {
-		Object.keys(SOURCE_SECTIONS).forEach((id) => {
-			const heading = document.getElementById(id);
-			if (!heading || !main.contains(heading)) return;
-			const hidden = SOURCE_SECTIONS[id].indexOf(type) < 0;
-			const level = Number(heading.tagName.slice(1));
-			heading.hidden = hidden;
-			for (let node = heading.nextElementSibling; node; node = node.nextElementSibling) {
-				if (/^H[1-6]$/.test(node.tagName) && Number(node.tagName.slice(1)) <= level) break;
-				node.hidden = hidden;
-			}
-		});
+	   the next heading of the same or a higher level. With a preset, the
+	   preset provides type, address and the type's options. */
+	function showSections(main, type, preset) {
+		showSection(main, 'type-and-address', !!preset);
+		Object.keys(SOURCE_SECTIONS).forEach((id) => showSection(main, id, !!preset || SOURCE_SECTIONS[id].indexOf(type) < 0));
+	}
+
+	/* include/exclude rules and the category map, for every source */
+	function sourceFilters(ctx, obj) {
+		const include = [];
+		const exclude = [];
+		ctx.matches.items().forEach((m) => (m.kind === 'exclude' ? exclude : include).push({ field: m.field, regex: m.regex }));
+		if (include.length) obj.include = include;
+		if (exclude.length) obj.exclude = exclude;
+		const map = {};
+		ctx.categoryMap.items().forEach((m) => { map[m.from] = m.to; });
+		if (!isEmpty(map)) obj.categoryMap = map;
+		return obj;
 	}
 
 	function sourceFields(type) {
@@ -1318,9 +1353,74 @@
 				],
 			});
 			ctx.auto = autoFill(ctx.main, 'label', 'file_name', () => slug(getValue(ctx.main, 'label')));
+			const sync = () => showSections(ctx.main, sourceType(ctx), presetName(ctx));
+			ctx.syncSections = sync;
+
+			ctx.presets = {};
+			ctx.presetsLoaded = false;
+			ctx.presetParams = {};
+			ctx.presetKept = [];
+			const presetSelect = field(ctx.main, 'preset');
+			const paramsBox = ctx.main.querySelector('[data-cfg-preset-params]');
+			ctx.presetOption = (name, label) => {
+				let option = Array.prototype.find.call(presetSelect.options, (o) => o.value === name);
+				if (!option) {
+					option = el('option', { value: name });
+					presetSelect.appendChild(option);
+				}
+				option.textContent = label;
+			};
+			ctx.renderPresetParams = () => {
+				if (!paramsBox) return;
+				paramsBox.textContent = '';
+				const name = presetName(ctx);
+				if (!name) return;
+				const preset = ctx.presets[name];
+				if (!preset) {
+					paramsBox.appendChild(el('p', { class: 'cfg-hint', text: ctx.presetsLoaded ? 'This version of the config UI doesn’t know the preset “' + name + '”. Its parameters are kept as they are.' : 'Loading the presets…' }));
+					return;
+				}
+				paramsBox.appendChild(el('p', { class: 'cfg-hint', text: preset.description }));
+				const form = el('form', { class: 'cfg-preset-form', onsubmit: (event) => event.preventDefault() });
+				Object.keys(preset.params || {}).forEach((key) => {
+					const def = preset.params[key];
+					const id = 'cfg-preset-param-' + key;
+					const input = el('input', { type: 'text', id: id, name: 'preset_param_' + key, autocomplete: 'off', spellcheck: 'false' });
+					input.value = ctx.presetParams[key] || '';
+					if (def.example || def.default) input.setAttribute('placeholder', def.example || def.default);
+					if (def.required) input.required = true;
+					input.addEventListener('input', () => { ctx.presetParams[key] = input.value; });
+					const hint = [def.description, def.default ? 'Default: ' + def.default + '.' : ''].filter(Boolean).join(' ');
+					form.appendChild(el('label', { for: id, text: (def.label || key) + (def.required ? '*' : '') }));
+					form.appendChild(input);
+					if (hint) {
+						const small = el('small', { class: 'cfg-hint', id: id + '-hint', text: hint });
+						input.setAttribute('aria-describedby', small.id);
+						form.appendChild(small);
+					}
+				});
+				paramsBox.appendChild(form);
+				if (ctx.presetKept.length) {
+					paramsBox.appendChild(el('p', { class: 'cfg-hint', text: 'Kept from the loaded file as overrides of the preset: ' + ctx.presetKept.join(', ') + '.' }));
+				}
+			};
+			presetSelect.addEventListener('change', () => {
+				ctx.renderPresetParams();
+				sync();
+			});
+			loadPresets().then((list) => {
+				list.forEach((p) => {
+					ctx.presets[p.name] = p;
+					ctx.presetOption(p.name, p.label || p.name);
+				});
+				ctx.presetsLoaded = true;
+				ctx.renderPresetParams();
+				ctx.refresh();
+			});
+
 			const typeSelect = field(ctx.main, 'type');
-			typeSelect.addEventListener('change', () => showSections(ctx.main, sourceType(ctx)));
-			typeSelect.form.addEventListener('reset', () => setTimeout(() => showSections(ctx.main, sourceType(ctx))));
+			typeSelect.addEventListener('change', sync);
+			typeSelect.form.addEventListener('reset', () => setTimeout(sync));
 			const bar = el('p', { class: 'cfg-template' }, [button('Fill in the example for this type', () => {
 				const type = sourceType(ctx);
 				if (getValue(ctx.main, 'url') && !window.confirm('Replace the current fields with the example for “' + type + '”?')) return;
@@ -1330,9 +1430,21 @@
 				field(ctx.main, 'label').dispatchEvent(new Event('input', { bubbles: true }));
 			})]);
 			typeSelect.form.appendChild(bar);
-			showSections(ctx.main, sourceType(ctx));
+			sync();
 		},
 		build: (ctx) => {
+			const preset = presetName(ctx);
+			if (preset) {
+				const obj = readObject(ctx.main, SOURCE_COMMON.filter((d) => d.key !== 'type' && d.key !== 'url').concat(SOURCE_FILTERS));
+				obj.preset = preset;
+				const params = {};
+				Object.keys(ctx.presetParams).forEach((key) => {
+					const value = String(ctx.presetParams[key] || '').trim();
+					if (value) params[key] = value;
+				});
+				if (!isEmpty(params)) obj.params = params;
+				return ordered(sourceFilters(ctx, obj), SOURCE_ORDER);
+			}
 			const type = sourceType(ctx);
 			const obj = readObject(ctx.main, sourceFields(type));
 			obj.type = type;
@@ -1357,19 +1469,34 @@
 				if (!isEmpty(price)) mapping.price = price;
 				if (!isEmpty(mapping)) obj.mapping = ordered(mapping, TARGETS);
 			}
-			const include = [];
-			const exclude = [];
-			ctx.matches.items().forEach((m) => (m.kind === 'exclude' ? exclude : include).push({ field: m.field, regex: m.regex }));
-			if (include.length) obj.include = include;
-			if (exclude.length) obj.exclude = exclude;
-			const map = {};
-			ctx.categoryMap.items().forEach((m) => { map[m.from] = m.to; });
-			if (!isEmpty(map)) obj.categoryMap = map;
-			return ordered(obj, SOURCE_ORDER);
+			return ordered(sourceFilters(ctx, obj), SOURCE_ORDER);
 		},
 		load: (ctx, obj) => {
-			writeObject(ctx.main, ctx.allFields, obj);
-			if (TYPES.indexOf(obj.type) < 0) setValue(ctx.main, 'type', 'ical');
+			const preset = typeof obj.preset === 'string' ? obj.preset : '';
+			ctx.presetParams = Object.assign({}, obj.params || {});
+			ctx.presetKept = [];
+			if (preset) {
+				if (!ctx.presets[preset]) ctx.presetOption(preset, preset);
+				PRESET_KEEP.forEach((key) => {
+					if (key in obj) {
+						ctx.extras[key] = obj[key];
+						ctx.presetKept.push(key);
+					}
+				});
+			}
+			setValue(ctx.main, 'preset', preset || 'none');
+			writeObject(ctx.main, ctx.allFields, preset ? {} : obj);
+			writeObject(ctx.main, SOURCE_COMMON.filter((d) => d.key !== 'type' && d.key !== 'url').concat(SOURCE_FILTERS), obj);
+			if (preset || TYPES.indexOf(obj.type) < 0) setValue(ctx.main, 'type', 'ical');
+			ctx.renderPresetParams();
+			if (preset) {
+				ctx.extract.set([]);
+				ctx.rules.set([]);
+				ctx.categoryMap.set(Object.keys(obj.categoryMap || {}).map((from) => ({ from: from, to: obj.categoryMap[from] })));
+				ctx.matches.set((obj.include || []).map((m) => Object.assign({ kind: 'include' }, m)).concat((obj.exclude || []).map((m) => Object.assign({ kind: 'exclude' }, m))));
+				ctx.syncSections();
+				return;
+			}
 			ctx.extract.set(Object.keys(obj.extract || {}).map((name) => {
 				const rule = obj.extract[name];
 				return Object.assign({ name: name }, typeof rule === 'string' ? { selector: rule } : rule);
@@ -1379,7 +1506,7 @@
 			writeObject(formOf(ctx.main, 'amount_path'), PRICE, mapping.price || {});
 			ctx.categoryMap.set(Object.keys(obj.categoryMap || {}).map((from) => ({ from: from, to: obj.categoryMap[from] })));
 			ctx.matches.set((obj.include || []).map((m) => Object.assign({ kind: 'include' }, m)).concat((obj.exclude || []).map((m) => Object.assign({ kind: 'exclude' }, m))));
-			showSections(ctx.main, sourceType(ctx));
+			ctx.syncSections();
 		},
 		meta: (ctx) => ({ file: getValue(ctx.main, 'file_name') }),
 		restore: (ctx, meta) => {
@@ -1399,6 +1526,20 @@
 			if (!stem) p.push('Give the file a name.');
 			else if (!/^[A-Za-z0-9_.-]+$/.test(stem)) p.push('The file name should only contain letters, digits, “-”, “_” and “.”.');
 			if (/\.example$/i.test(stem)) p.push('Files ending in .example.json are templates and are not loaded.');
+			if (obj.preset) {
+				const preset = ctx.presets[obj.preset];
+				if (!preset && ctx.presetsLoaded) p.push('The core of this config UI has no preset “' + obj.preset + '”; check the name or the core version.');
+				const params = obj.params || {};
+				if (preset) {
+					Object.keys(preset.params || {}).forEach((key) => {
+						if (preset.params[key].required && !params[key]) p.push('Preset: “' + (preset.params[key].label || key) + '” is required.');
+					});
+					Object.keys(params).forEach((key) => {
+						if (!(key in (preset.params || {}))) p.push('Preset: “' + obj.preset + '” has no parameter “' + key + '”.');
+					});
+				}
+				return p.concat(sourceRefProblems(obj));
+			}
 			if (!obj.url) p.push('The URL is required.');
 			else if (!RE.url.test(obj.url)) p.push('The URL must start with https:// (or http://).');
 			if (obj.homepage && !RE.url.test(obj.homepage)) p.push('The homepage must be an absolute URL.');
@@ -1423,17 +1564,22 @@
 					});
 				}
 			}
-			const catRefs = [];
-			Object.keys(obj.categoryMap || {}).forEach((from) => catRefs.push({ where: 'Category map “' + from + '”', value: obj.categoryMap[from] }));
-			(obj.categories || []).forEach((name) => catRefs.push({ where: 'Allowed categories', value: name }));
-			const mapping = obj.mapping || {};
-			if (mapping.category && mapping.category.default) catRefs.push({ where: 'Field mapping, category default', value: mapping.category.default });
-			const placeRefs = [];
-			if (obj.place) placeRefs.push({ where: 'Place', value: obj.place });
-			if (mapping.placeRef && mapping.placeRef.default) placeRefs.push({ where: 'Field mapping, placeRef default', value: mapping.placeRef.default });
-			return p.concat(refProblems(catRefs, placeRefs));
+			return p.concat(sourceRefProblems(obj));
 		},
 	};
+
+	/* categories and places a source refers to that the instance lacks */
+	function sourceRefProblems(obj) {
+		const catRefs = [];
+		Object.keys(obj.categoryMap || {}).forEach((from) => catRefs.push({ where: 'Category map “' + from + '”', value: obj.categoryMap[from] }));
+		(obj.categories || []).forEach((name) => catRefs.push({ where: 'Allowed categories', value: name }));
+		const mapping = obj.mapping || {};
+		if (mapping.category && mapping.category.default) catRefs.push({ where: 'Field mapping, category default', value: mapping.category.default });
+		const placeRefs = [];
+		if (obj.place) placeRefs.push({ where: 'Place', value: obj.place });
+		if (mapping.placeRef && mapping.placeRef.default) placeRefs.push({ where: 'Field mapping, placeRef default', value: mapping.placeRef.default });
+		return refProblems(catRefs, placeRefs);
+	}
 
 	/* ---------- start page: load, check and download the instance ---------- */
 

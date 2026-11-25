@@ -12,6 +12,18 @@ breaks when it changes.
 
 <div data-cfg-import></div>
 
+## Preset
+
+For platforms that many sites use, the core ships a preset: choose it and
+fill in a few values instead of type, selectors and field mapping. Details:
+[Presets](https://docs.openlitfass.org/?page=source-types#presets).
+
+:::form
+Preset = {(none -> No preset: configure the source yourself)}
+:::
+
+<div data-cfg-preset-params></div>
+
 ## Type and address
 
 :::form
