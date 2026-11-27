@@ -1753,6 +1753,12 @@
 	const PAGES_PAGE = 'pages';
 	const PAGE_TOOLBAR = ['bold', 'italic', 'heading', '|', 'link', 'list', 'numbered', 'quote', '|', 'rule'];
 
+	/* the sidebar lists the h2/h3 with an id in <main>; a preview's own
+	   headings are not sections of this page */
+	function withoutHeadingIds(root) {
+		root.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]').forEach((heading) => heading.removeAttribute('id'));
+	}
+
 	function setUpPages(box) {
 		const draftKey = DRAFT_PREFIX + PAGES_PAGE;
 		const boundKey = BOUND_PREFIX + PAGES_PAGE;
@@ -1782,6 +1788,7 @@
 			mode: 'split',
 			labels: { input: 'Markdown of the page' },
 			onChange: () => changed(),
+			afterRender: withoutHeadingIds,
 		});
 
 		const name = () => nameInput.value.trim();
@@ -1955,6 +1962,214 @@
 		const start = WS.active() ? [requested, requested === null ? stored : null].find((p) => p && WS.isPage(p) && WS.has(p)) : null;
 		if (start) open(start);
 		else openDraft();
+		renderBar();
+		WS.onChange(renderBar);
+	}
+
+	/* ---------- imprint and privacy policy (#20) ---------- */
+
+	/* German templates for site/pages/impressum.md and datenschutz.md, built
+	   from a few fields. They describe what the openLitfass front end does
+	   (web/js: no cookies, settings in localStorage, map tiles and event
+	   images only on request); everything else is up to the instance. */
+	const LEGAL_PAGE = 'legal';
+	const LEGAL_FIELDS = [
+		{ name: 'name', placeholder: 'Erika Mustermann or Kiezverein e. V.', hint: 'Person or organisation that runs the site; for an association, also name who represents it.' },
+		{ name: 'address', placeholder: 'Musterstraße 1\n13086 Berlin', hint: 'A postal address where you can be reached; no PO box.' },
+		{ name: 'e-mail', placeholder: 'kontakt@example.org' },
+		{ name: 'phone', hint: 'Optional, if the e-mail address is the only fast way to reach you.' },
+		{ name: 'responsible_person', placeholder: 'Erika Mustermann' },
+		{ name: 'responsible_address', hint: 'Leave empty if it is the address above.' },
+		{ name: 'hosting', hint: 'Who delivers the pages and so sees the visitors’ IP addresses.' },
+		{ name: 'hosting_company', placeholder: 'Beispiel Hosting GmbH, Serverweg 2, 10115 Berlin', hint: 'Name and address of the hosting company, for a server of your own; empty if you run the server yourself.' },
+		{ name: 'statistics', placeholder: 'Plausible Analytics', hint: 'Only if site/custom-script.js loads a statistics tool: its name. The template then asks you to describe it.' },
+		{ name: 'supervisory_authority', placeholder: 'Berliner Beauftragte für Datenschutz und Informationsfreiheit', hint: 'Optional: the data protection authority of your federal state.' },
+	];
+	const LEGAL_URLS = { impressum: 'seite.html?page=impressum', datenschutz: 'seite.html?page=datenschutz' };
+
+	/* user input as plain Markdown text: no formatting, links, lists or HTML.
+	   Showdown takes backslash escapes for these characters; the others
+	   become entities, which it passes through. */
+	function mdText(text) {
+		return String(text || '').trim()
+			.replace(/([\\`*_[\]#!])/g, '\\$1')
+			.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\|/g, '&#124;').replace(/~/g, '&#126;')
+			.replace(/^(\d+)\./, '$1\\.').replace(/^([-+])/, '\\$1');
+	}
+
+	function mdLines(text) {
+		return String(text || '').split(/\r?\n/).map((line) => mdText(line)).filter(Boolean).join(HARD_BREAK);
+	}
+
+	/* lines of one block (an address), joined with Markdown hard breaks */
+	const HARD_BREAK = '  \n';
+	function mdBlock(lines) {
+		return lines.filter(Boolean).join(HARD_BREAK);
+	}
+
+	function mdMail(address) {
+		const mail = String(address || '').trim();
+		return /^[^\s@<>()[\]]+@[^\s@<>()[\]]+\.[^\s@<>()[\]]+$/.test(mail) ? '[' + mail + '](mailto:' + mail + ')' : mdText(mail);
+	}
+
+	function imprintMarkdown(v) {
+		const out = ['# Impressum', '', '## Angaben gemäß § 5 DDG', '', mdBlock([mdText(v.name) || '[Name]', mdLines(v.address) || '[Anschrift]']), '', '## Kontakt', ''];
+		out.push(mdBlock(['E-Mail: ' + (mdMail(v.email) || '[E-Mail-Adresse]'), v.phone ? 'Telefon: ' + mdText(v.phone) : '']));
+		if (v.responsible) {
+			out.push('', '## Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV', '', mdBlock([mdText(v.responsible), mdLines(v.responsibleAddress) || mdLines(v.address)]));
+		}
+		out.push('', '## Termine', '',
+			'Die Termine stammen von den Websites der Veranstalter und werden automatisch übernommen. Für ihre Richtigkeit sind die jeweiligen Veranstalter verantwortlich.');
+		return out.join('\n') + '\n';
+	}
+
+	function privacyMarkdown(v) {
+		const out = ['# Datenschutzerklärung', '', '## Verantwortlich', '', mdBlock([mdText(v.name) || '[Name]', mdLines(v.address) || '[Anschrift]', 'E-Mail: ' + (mdMail(v.email) || '[E-Mail-Adresse]')]), ''];
+		out.push('## Aufruf der Website', '');
+		if (v.hosting === 'github') {
+			out.push('Die Website wird über GitHub Pages bereitgestellt, einen Dienst der GitHub, Inc., 88 Colin P. Kelly Jr. Street, San Francisco, CA 94107, USA. '
+				+ 'Beim Aufruf jeder Seite verarbeitet GitHub technisch notwendige Daten – deine IP-Adresse, Datum und Uhrzeit, die aufgerufene Adresse und Angaben zu deinem Browser –, um die Seite auszuliefern und vor Missbrauch zu schützen. '
+				+ 'Dabei können Daten in die USA übermittelt werden; GitHub ist als Teil von Microsoft unter dem EU-US Data Privacy Framework zertifiziert. '
+				+ 'Mehr dazu in der [Datenschutzerklärung von GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).');
+		} else {
+			out.push((v.hostingCompany ? 'Die Website liegt bei ' + mdText(v.hostingCompany.replace(/\s*\r?\n\s*/g, ', ')) + '. ' : '')
+				+ 'Beim Aufruf jeder Seite verarbeitet der Server technisch notwendige Daten – deine IP-Adresse, Datum und Uhrzeit, die aufgerufene Adresse und Angaben zu deinem Browser –, um die Seite auszuliefern und vor Missbrauch zu schützen. '
+				+ '**[Ergänze, ob diese Daten in Protokolldateien gespeichert werden und wann sie gelöscht werden.]**');
+		}
+		out.push('', 'Rechtsgrundlage ist unser berechtigtes Interesse an einer sicheren und zuverlässigen Bereitstellung der Website (Art. 6 Abs. 1 lit. f DSGVO).', '');
+		out.push('## Keine Cookies, Einstellungen im Browser', '',
+			'Die Website setzt keine Cookies. Deine Einstellungen, etwa für das Farbschema, Karten und Bilder, speichert sie nur im lokalen Speicher deines Browsers (localStorage); sie werden nicht übertragen. Du kannst sie in deinem Browser jederzeit löschen.', '');
+		out.push('## Karten', '',
+			'Kartenausschnitte werden erst geladen, wenn du „Karte anzeigen“ wählst oder es in den Einstellungen so festlegst. '
+			+ 'Dann lädt dein Browser Kartenbilder von OpenStreetMap (OpenStreetMap Foundation, St John’s Innovation Centre, Cowley Road, Cambridge, CB4 0WS, Vereinigtes Königreich), deren Server dabei deine IP-Adresse erhält. '
+			+ 'Mehr dazu in der [Datenschutzerklärung der OpenStreetMap Foundation](https://osmfoundation.org/wiki/Privacy_Policy).', '');
+		out.push('## Bilder der Veranstalter', '',
+			'Bilder zu Terminen werden nur auf deinen Wunsch oder nach deiner Einstellung geladen, und zwar direkt vom Server des jeweiligen Veranstalters. Dieser erhält dabei deine IP-Adresse, aber nicht die Adresse der Seite, auf der du das Bild ansiehst.', '');
+		if (v.statistics) {
+			out.push('## Statistik', '', 'Um zu sehen, wie die Website genutzt wird, setzt sie ' + mdText(v.statistics) + ' ein. '
+				+ '**[Ergänze, welche Daten dabei verarbeitet werden, durch wen, wo und auf welcher Rechtsgrundlage, und wie man widersprechen kann.]**', '');
+		}
+		out.push('## Links', '', 'Links zu Veranstaltern und anderen Websites führen zu Angeboten, für die deren Betreiber verantwortlich sind.', '');
+		out.push('## Deine Rechte', '',
+			'Du hast das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20) und Widerspruch (Art. 21). Schreib dazu an die oben genannte Adresse. '
+			+ 'Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren (Art. 77 DSGVO)' + (v.authority ? ', zum Beispiel bei: ' + mdText(v.authority) : '') + '.');
+		return out.join('\n') + '\n';
+	}
+
+	function setUpLegal(main, box) {
+		const draftKey = DRAFT_PREFIX + LEGAL_PAGE;
+		const bar = main.querySelector('[data-cfg-legal-bar]');
+		const warnings = el('ul', { class: 'cfg-warnings', hidden: '' });
+		const status = el('span', { class: 'cfg-status', role: 'status' });
+		const outputs = {};
+
+		decorate(main, LEGAL_FIELDS);
+		main.addEventListener('mdp:form-submit', (event) => event.preventDefault());
+
+		function values() {
+			const get = (name) => getValue(main, name) || '';
+			return {
+				name: get('name'), address: get('address'), email: get('e-mail'), phone: get('phone'),
+				responsible: get('responsible_person'), responsibleAddress: get('responsible_address'),
+				hosting: get('hosting') || 'github', hostingCompany: get('hosting_company'),
+				statistics: get('statistics'), authority: get('supervisory_authority'),
+			};
+		}
+
+		function pages() {
+			const v = values();
+			return { impressum: imprintMarkdown(v), datenschutz: privacyMarkdown(v) };
+		}
+
+		function addToInstance() {
+			const md = pages();
+			const replace = Object.keys(md).map((stem) => WS.PAGES_DIR + stem + '.md').filter((path) => WS.has(path) && WS.text(path) !== md[path.slice(WS.PAGES_DIR.length, -3)]);
+			if (replace.length && !window.confirm('Replace ' + replace.join(' and ') + ' in the loaded instance? Changes made there on the Pages page are lost.')) return;
+			Object.keys(md).forEach((stem) => WS.saveText(WS.PAGES_DIR + stem + '.md', md[stem]));
+			const notes = ['Saved ' + Object.keys(md).map((stem) => WS.PAGES_DIR + stem + '.md').join(' and ') + '.'];
+			const inst = WS.get('instance.json');
+			if (inst) {
+				const links = { imprintUrl: LEGAL_URLS.impressum, privacyUrl: LEGAL_URLS.datenschutz };
+				const other = Object.keys(links).filter((key) => inst[key] && inst[key] !== links[key]);
+				if (!other.length || window.confirm('instance.json links ' + other.map((key) => key + ' to “' + inst[key] + '”').join(' and ') + '. Point ' + (other.length === 1 ? 'it' : 'them') + ' to the new pages?')) {
+					WS.save('instance.json', Object.assign({}, inst, links));
+					notes.push('imprintUrl and privacyUrl in instance.json point to them.');
+				}
+			} else {
+				notes.push('The loaded instance has no instance.json; set imprintUrl and privacyUrl there.');
+			}
+			status.textContent = notes.join(' ');
+		}
+
+		function renderBar() {
+			if (!bar) return;
+			bar.textContent = '';
+			bar.classList.add('cfg-import');
+			if (!WS.active()) {
+				bar.append('Your input is kept in this browser. Download the two pages below, or ',
+					el('a', { href: '.', text: 'load your instance on the start page' }), ' to add them to it.');
+				return;
+			}
+			const existing = Object.keys(LEGAL_URLS).map((stem) => WS.PAGES_DIR + stem + '.md').filter((path) => WS.has(path));
+			bar.append('Instance “' + WS.instanceName() + '”' + (existing.length ? ' already has ' + existing.join(' and ') + '; adding replaces ' + (existing.length === 1 ? 'it' : 'them') + '. ' : '. '),
+				button('Add to the instance', addToInstance), ' ', button('Download all (ZIP)', () => downloadZip(status)), ' ', el('a', { href: '.', text: 'Overview' }));
+		}
+
+		function download(stem) {
+			downloadBlob(new Blob([pages()[stem]], { type: 'text/markdown;charset=utf-8' }), stem + '.md');
+			status.textContent = 'Downloaded ' + stem + '.md; put it into site/pages/ and set ' + (stem === 'impressum' ? 'imprintUrl' : 'privacyUrl') + ' to “' + LEGAL_URLS[stem] + '”.';
+		}
+
+		Object.keys(LEGAL_URLS).forEach((stem) => {
+			const preview = el('div', { class: 'cfg-legal-preview' });
+			outputs[stem] = preview;
+			box.append(el('h3', {}, [el('code', { text: WS.PAGES_DIR + stem + '.md' })]), preview,
+				el('p', { class: 'cfg-actions' }, [button('Download ' + stem + '.md', () => download(stem))]));
+		});
+		box.insertBefore(warnings, box.firstChild);
+		box.appendChild(el('p', { class: 'cfg-actions' }, [
+			button('Start over', () => {
+				if (!window.confirm('Clear all fields of this page?')) return;
+				try { localStorage.removeItem(draftKey); } catch (e) {}
+				main.querySelectorAll('form').forEach((form) => form.reset());
+				refresh();
+			}),
+			status,
+		]));
+
+		let timer = null;
+		function refresh() {
+			clearTimeout(timer);
+			timer = setTimeout(() => {
+				const v = values();
+				const problems = [];
+				if (!v.name) problems.push('Name: who runs the site is required.');
+				if (!v.address) problems.push('Address: a postal address is required.');
+				if (!v.email) problems.push('E-mail: an address for fast contact is required.');
+				else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)) problems.push('E-mail: “' + v.email + '” does not look like an e-mail address.');
+				if (v.hosting === 'github' && v.hostingCompany) problems.push('Hosting company is only used for a server of your own; it is left out for GitHub Pages.');
+				warnings.textContent = '';
+				problems.forEach((p) => warnings.appendChild(el('li', { text: p })));
+				warnings.hidden = !problems.length;
+				const md = pages();
+				Promise.resolve(window.MarkdownPages.ready).then(() => {
+					Object.keys(md).forEach((stem) => {
+						outputs[stem].innerHTML = window.MarkdownPages.toHtml(md[stem]);
+						withoutHeadingIds(outputs[stem]);
+					});
+				});
+				const draft = {};
+				LEGAL_FIELDS.forEach((d) => { draft[d.name] = getValue(main, d.name); });
+				try { localStorage.setItem(draftKey, JSON.stringify(draft)); } catch (e) {}
+			}, 150);
+		}
+		main.addEventListener('input', refresh);
+		main.addEventListener('change', refresh);
+
+		let draft = null;
+		try { draft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch (e) {}
+		if (draft) Object.keys(draft).forEach((name) => setValue(main, name, draft[name]));
+		refresh();
 		renderBar();
 		WS.onChange(renderBar);
 	}
@@ -2232,5 +2447,7 @@
 		if (box) setUpWorkspace(box);
 		const pages = main.querySelector('[data-cfg-pages]');
 		if (pages) setUpPages(pages);
+		const legal = main.querySelector('[data-cfg-legal]');
+		if (legal) setUpLegal(main, legal);
 	});
 })();

@@ -53,6 +53,7 @@ Only the configuration and the pages are read: `instance.json`,
 <a href="?page=inbox"><strong>Inbox event</strong>A single or recurring event added by hand.</a>
 <a href="?page=source"><strong>Source</strong>An iCalendar, RSS, JSON, HTML or WordPress source with its field mapping and filters, or a preset of the core.</a>
 <a href="?page=pages"><strong>Pages</strong>Pages in Markdown, such as the imprint and the privacy policy, with a preview.</a>
+<a href="?page=legal"><strong>Imprint and privacy</strong>German templates for the imprint and the privacy policy, built from a few fields.</a>
 </div>
 
 ## How it works

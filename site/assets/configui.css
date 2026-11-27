@@ -329,6 +329,10 @@ main form button[type="submit"] { justify-self: start; margin-top: .8rem; }
 }
 .cfg-page-editor .markdown-pages-editor button { font: inherit; font-size: .9rem; color: var(--text); }
 .cfg-page-editor .markdown-pages-editor button[aria-pressed="true"] { color: var(--markdown-pages-editor-active-text); }
+.cfg-legal-preview {
+	max-height: 24rem; overflow: auto; margin: .5rem 0; padding: .4rem 1.1rem;
+	background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
 .cfg-page-editor .markdown-pages-editor-input { font-family: var(--mono); font-size: .88rem; color: var(--text); background: var(--bg); }
 .cfg-template { margin-top: .8rem; }
 
