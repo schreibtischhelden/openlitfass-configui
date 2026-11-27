@@ -1,8 +1,9 @@
 /* openLitfass config: the loaded instance ("workspace"). The configuration
-   files of one instance are read from a folder, single files or a ZIP and
-   kept in localStorage as text, so that every form page can edit them and
-   the whole set can be downloaded again as a ZIP. Files that are not
-   changed are written back byte for byte. Nothing is sent anywhere. */
+   files of one instance are read from a folder, single files, a ZIP or a
+   git repository (assets/repo.js) and kept in localStorage as text, so that
+   every form page can edit them and the whole set can be downloaded again
+   as a ZIP. Files that are not changed are written back byte for byte.
+   Nothing is sent anywhere. */
 (function () {
 	'use strict';
 
@@ -110,8 +111,9 @@
 		return zipLoading;
 	}
 
-	/* entries: [{ path, file }] (path relative to what was picked or dropped) */
-	async function importEntries(entries, replace) {
+	/* entries: [{ path, file }] (path relative to what was picked or dropped)
+	   or [{ path, read }]; origin: where a replacing import came from */
+	async function importEntries(entries, replace, origin) {
 		// only the paths first: a picked instance folder also holds data/,
 		// public/ and .git/, which are never read
 		const candidates = [];
@@ -122,7 +124,7 @@
 					candidates.push({ path: name, read: () => archive.files[name].async('string') });
 				});
 			} else {
-				candidates.push({ path: entry.path, read: () => readText(entry.file) });
+				candidates.push({ path: entry.path, read: entry.read || (() => readText(entry.file)) });
 			}
 		}
 		const strip = stripTop(candidates.map((c) => c.path.replace(/\\/g, '/')));
@@ -144,7 +146,9 @@
 			files[target] = text;
 		}
 		if (!report.added.length && !report.replaced.length) return report;
+		const from = replace || !state ? origin : state.origin;
 		state = { files: files, loaded: new Date().toISOString() };
+		if (from) state.origin = from;
 		persist();
 		return report;
 	}
@@ -317,6 +321,7 @@
 		check: check,
 		instanceName: instanceName,
 		loadedAt: () => (state ? state.loaded : null),
+		origin: () => (state && state.origin) || null,
 		zip: zip,
 		onChange: (fn) => listeners.push(fn),
 		FOLDERS: FOLDERS,

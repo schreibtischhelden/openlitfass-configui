@@ -11,6 +11,7 @@
 	const page = new URLSearchParams(window.location.search).get('page') || '';
 	const DRAFT_PREFIX = 'ol-config-draft:';
 	const BOUND_PREFIX = 'ol-config-bound:';
+	const REPO_KEY = 'ol-config-repo';
 	const TABLER_URL = 'https://github.com/tabler/tabler-icons';
 	const WS = window.OLWorkspace;
 	const SPECS = {};
@@ -1662,17 +1663,40 @@
 			Object.keys(SPECS).forEach((name) => { try { localStorage.removeItem(BOUND_PREFIX + name); } catch (e) {} });
 		}
 
+		function confirmReplace() {
+			return !WS.active() || window.confirm('Replace the loaded instance “' + WS.instanceName() + '”? Changes that you have not downloaded are lost.');
+		}
+
 		async function load(entries, wholeInstance) {
 			if (!entries.length) return;
 			const zip = entries.some((e) => /\.zip$/i.test(e.path));
 			const replace = wholeInstance || zip;
-			if (replace && WS.active() && !window.confirm('Replace the loaded instance “' + WS.instanceName() + '”? Changes that you have not downloaded are lost.')) return;
+			if (replace && !confirmReplace()) return;
 			status.textContent = 'Reading…';
+			await importAndReport(entries, replace);
+		}
+
+		async function loadRepo(presetId, address) {
+			if (!confirmReplace()) return;
+			status.textContent = 'Loading from the repository…';
+			let result;
 			try {
-				const report = await WS.importEntries(entries, replace);
+				result = await window.OLRepo.load(presetId, address);
+			} catch (e) {
+				status.textContent = e.message;
+				return;
+			}
+			try { localStorage.setItem(REPO_KEY, JSON.stringify({ preset: result.origin.preset, url: address })); } catch (e) {}
+			repoForm.hidden = true;
+			await importAndReport(result.entries, true, result.origin);
+		}
+
+		async function importAndReport(entries, replace, origin) {
+			try {
+				const report = await WS.importEntries(entries, replace, origin);
 				if (replace) forgetBindings();
 				const parts = [];
-				if (report.added.length) parts.push(report.added.length + (report.added.length === 1 ? ' file' : ' files') + ' loaded');
+				if (report.added.length) parts.push(report.added.length + (report.added.length === 1 ? ' file' : ' files') + ' loaded' + (origin ? ' from ' + origin.label : ''));
 				if (report.replaced.length) parts.push(report.replaced.length + ' replaced');
 				if (report.invalid.length) parts.push('not valid JSON: ' + report.invalid.join(', '));
 				if (report.ignored.length) parts.push('ignored (not a configuration file): ' + report.ignored.join(', '));
@@ -1681,6 +1705,52 @@
 				status.textContent = e.message;
 			}
 			render();
+		}
+
+		const repoHost = el('select', { id: 'cfg-repo-host' }, window.OLRepo.presets().map((p) => el('option', { value: p.id, text: p.label })));
+		const repoAddress = el('input', { id: 'cfg-repo-address', type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false', required: '' });
+		const repoForm = el('form', { class: 'cfg-repo', hidden: '', novalidate: '' }, [
+			el('label', { for: 'cfg-repo-host', text: 'Hosting' }),
+			repoHost,
+			el('label', { for: 'cfg-repo-address', text: 'Repository' }),
+			repoAddress,
+			el('p', { class: 'cfg-hint', text: 'A public repository, its address as copied from the browser. It may name a branch and the folder of the instance (…/tree/main/instance). The page reads instance.json, categories.json, places.json, holidays.json, sources/ and inbox/ straight from the server; the server has to allow that (CORS).' }),
+			el('p', { class: 'cfg-actions' }, [
+				el('button', { type: 'submit', class: 'cfg-button cfg-primary', text: 'Load' }),
+				button('Cancel', () => { repoForm.hidden = true; }),
+			]),
+		]);
+		const placeholders = {
+			github: 'https://github.com/owner/repository or owner/repository',
+			codeberg: 'https://codeberg.org/owner/repository or owner/repository',
+			gitlab: 'https://gitlab.com/group/project',
+			forgejo: 'https://git.example.org/owner/repository',
+		};
+		const showPlaceholder = () => repoAddress.setAttribute('placeholder', placeholders[repoHost.value] || '');
+		repoHost.addEventListener('change', showPlaceholder);
+		repoAddress.addEventListener('input', () => {
+			const match = window.OLRepo.presets().find((p) => p.server && repoAddress.value.trim().indexOf(p.server + '/') === 0);
+			if (match && repoHost.value !== match.id) {
+				repoHost.value = match.id;
+				showPlaceholder();
+			}
+		});
+		repoForm.addEventListener('submit', (event) => {
+			event.preventDefault();
+			loadRepo(repoHost.value, repoAddress.value);
+		});
+		function openRepoForm() {
+			let last = WS.origin();
+			if (!last) {
+				try { last = JSON.parse(localStorage.getItem(REPO_KEY) || 'null'); } catch (e) {}
+			}
+			if (last && window.OLRepo.preset(last.preset)) {
+				repoHost.value = last.preset;
+				if (!repoAddress.value) repoAddress.value = last.url;
+			}
+			showPlaceholder();
+			repoForm.hidden = false;
+			repoAddress.focus();
 		}
 
 		folderInput.addEventListener('change', () => {
@@ -1706,19 +1776,23 @@
 			const actions = el('p', { class: 'cfg-actions' }, [
 				button('Load the instance folder…', () => folderInput.click(), 'cfg-button' + (WS.active() ? '' : ' cfg-primary')),
 				button('Load files or a ZIP…', () => filesInput.click()),
+				button('Load from a git repository…', openRepoForm),
 				el('span', { class: 'cfg-muted', text: 'or drop them here.' }),
 			]);
 			content.appendChild(actions);
+			content.appendChild(repoForm);
 			if (!WS.active()) return;
 
 			const paths = WS.paths();
+			const origin = WS.origin();
 			const head = el('p', { class: 'cfg-workspace-head' }, [
 				el('strong', { text: 'Loaded: “' + WS.instanceName() + '”' }),
-				' – ' + paths.length + (paths.length === 1 ? ' file' : ' files') + '. ',
-			]);
+				' – ' + paths.length + (paths.length === 1 ? ' file' : ' files'),
+			].concat(origin ? [', from ', el('a', { href: origin.url, rel: 'noopener', text: origin.label }), '. '] : ['. ']));
 			content.appendChild(head);
 			content.appendChild(el('p', { class: 'cfg-actions' }, [
 				button('Download all (ZIP)', () => downloadZip(status), 'cfg-button cfg-primary'),
+				origin ? button('Load again from the repository', () => loadRepo(origin.preset, origin.url)) : '',
 				button('Unload', () => {
 					if (!window.confirm('Remove the loaded instance from this browser? Changes that you have not downloaded are lost. Your files on disk are not touched.')) return;
 					WS.clear();

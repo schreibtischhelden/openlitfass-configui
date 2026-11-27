@@ -10,7 +10,10 @@ this repository holds only the content. The pages are Markdown with
 `:::form` blocks, rendered in the browser by
 [markdown-pages.js](https://github.com/schreibtischhelden/markdown-pages.js);
 `assets/configui.js` turns the forms into JSON files. Nothing is sent to a
-server, and the site loads nothing from other hosts.
+server. The site loads its code only from itself; the only requests to
+other hosts are those of *Load from a git repository*, to the server the
+user names (hence `connect-src 'self' https:` in the Content Security
+Policy).
 
 ## Layout
 
@@ -27,6 +30,8 @@ site/
     setup.js           renderer options and saved theme, before rendering
     shell.js           navigation, menu toggle, theme switch
     workspace.js       the loaded instance: read, check, rename, ZIP
+    repo.js            load from a git repository: presets, plugin loader
+    hosts/<type>.js    one plugin per hosting API (github, forgejo, gitlab)
     configui.js        page specs: form fields ↔ JSON keys
     configui.css       layout and colours
     img/               icons
