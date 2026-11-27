@@ -1744,14 +1744,229 @@
 		return refProblems(catRefs, placeRefs);
 	}
 
+	/* ---------- Markdown pages (site/pages/*.md) ---------- */
+
+	/* The editor of markdown-pages.js (assets/vendor/markdown-pages-editor/)
+	   with a preview rendered like a markdown-pages.js site. Without a loaded
+	   instance the page is a draft in localStorage that can be downloaded;
+	   with one, it edits site/pages/<name>.md there. */
+	const PAGES_PAGE = 'pages';
+	const PAGE_TOOLBAR = ['bold', 'italic', 'heading', '|', 'link', 'list', 'numbered', 'quote', '|', 'rule'];
+
+	function setUpPages(box) {
+		const draftKey = DRAFT_PREFIX + PAGES_PAGE;
+		const boundKey = BOUND_PREFIX + PAGES_PAGE;
+		let bound = null;
+		let loading = false;
+		let saveTimer = null;
+
+		const bar = el('div', { class: 'cfg-import' });
+		const nameInput = el('input', { id: 'cfg-page-name', type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: 'impressum' });
+		const fileLabel = el('p', { class: 'cfg-hint' });
+		const form = el('form', { class: 'cfg-page-form', novalidate: '' }, [
+			el('label', { for: 'cfg-page-name', text: 'File name' }),
+			nameInput,
+			fileLabel,
+		]);
+		form.addEventListener('submit', (event) => event.preventDefault());
+		const warnings = el('ul', { class: 'cfg-warnings', hidden: '' });
+		const holder = el('div', { class: 'cfg-page-editor' });
+		const status = el('span', { class: 'cfg-status', role: 'status' });
+		const fileInput = el('input', { type: 'file', accept: '.md,.markdown,text/markdown,text/plain', hidden: '' });
+
+		box.classList.add('cfg-pages');
+		box.append(bar, form, warnings, holder);
+
+		const editor = window.MarkdownPages.editor(holder, {
+			toolbar: PAGE_TOOLBAR,
+			mode: 'split',
+			labels: { input: 'Markdown of the page' },
+			onChange: () => changed(),
+		});
+
+		const name = () => nameInput.value.trim();
+		const target = () => (WS.pageName(name()) ? WS.PAGES_DIR + name() + '.md' : null);
+
+		function readDraft() {
+			try { return JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch (e) { return null; }
+		}
+
+		function writeDraft() {
+			try { localStorage.setItem(draftKey, JSON.stringify({ name: nameInput.value, text: editor.getValue() })); } catch (e) {}
+		}
+
+		function bind(path) {
+			bound = path;
+			try { localStorage.setItem(boundKey, path || ''); } catch (e) {}
+		}
+
+		function show(fileName, text) {
+			loading = true;
+			nameInput.value = fileName;
+			editor.setValue(text);
+			editor.markSaved();
+			loading = false;
+			update();
+		}
+
+		function update() {
+			const problems = [];
+			const path = target();
+			if (!name()) problems.push('Give the page a file name, e.g. “impressum”.');
+			else if (!path) problems.push('“' + name() + '” cannot be the name of a page: use letters, digits, “-” and “_”, best in lower case; no spaces, slashes or umlauts.');
+			else if (bound && path !== bound && WS.has(path)) problems.push('“' + path + '” already exists in the loaded instance. Choose another file name; until then the changes are not saved there.');
+			warnings.textContent = '';
+			problems.forEach((p) => warnings.appendChild(el('li', { text: p })));
+			warnings.hidden = !problems.length;
+			fileLabel.textContent = '';
+			if (path) {
+				fileLabel.append('File: ', el('code', { text: path }), '. openLitfass shows it at ', el('code', { text: 'seite.html?page=' + name() }), ' – use that address as imprintUrl or privacyUrl, for example.');
+			} else {
+				fileLabel.append('The page is saved as ', el('code', { text: WS.PAGES_DIR + '<name>.md' }), '.');
+			}
+		}
+
+		function save() {
+			clearTimeout(saveTimer);
+			saveTimer = null;
+			const path = target();
+			if (!bound || !path) return;
+			if (path !== bound) {
+				if (WS.has(path)) return;
+				WS.move(bound, path);
+				bind(path);
+			}
+			WS.saveText(bound, editor.getValue());
+		}
+
+		function changed() {
+			if (loading) return;
+			update();
+			if (!bound) {
+				writeDraft();
+				return;
+			}
+			clearTimeout(saveTimer);
+			saveTimer = setTimeout(save, 300);
+		}
+		nameInput.addEventListener('input', changed);
+		window.addEventListener('pagehide', () => { if (saveTimer) save(); });
+
+		function open(path) {
+			bind(path);
+			show(path.slice(WS.PAGES_DIR.length).replace(/\.md$/i, ''), WS.text(path) || '');
+		}
+
+		function openDraft() {
+			bind(null);
+			const draft = readDraft();
+			show(draft && typeof draft.name === 'string' ? draft.name : '', draft && typeof draft.text === 'string' ? draft.text : '');
+		}
+
+		function addToInstance() {
+			const path = target();
+			if (!path) {
+				status.textContent = 'Give the page a valid file name first.';
+				nameInput.focus();
+				return;
+			}
+			if (WS.has(path) && !window.confirm(path + ' already exists in the loaded instance. Replace it?')) return;
+			bind(path);
+			WS.saveText(path, editor.getValue());
+			try { localStorage.removeItem(draftKey); } catch (e) {}
+			status.textContent = 'Added ' + path + ' to the loaded instance.';
+			update();
+			renderBar();
+		}
+
+		function renderBar() {
+			bar.textContent = '';
+			if (!WS.active()) {
+				bar.append(button('Import a Markdown file…', () => fileInput.click()),
+					' or write a new page. Your text is kept in this browser until you start over. To edit the pages of your instance, ',
+					el('a', { href: '.', text: 'load your instance on the start page' }), '.');
+				return;
+			}
+			const select = el('select', { 'aria-label': 'Page in the loaded instance' }, [el('option', { value: '', text: '(a new page)' })]
+				.concat(WS.pages().map((p) => el('option', { value: p, text: p.slice(WS.PAGES_DIR.length) }))));
+			select.value = bound || '';
+			select.addEventListener('change', () => {
+				if (saveTimer) save();
+				if (select.value) open(select.value);
+				else openDraft();
+				renderBar();
+			});
+			bar.appendChild(el('label', { class: 'cfg-bar-label' }, ['Instance “' + WS.instanceName() + '”, page in ' + WS.PAGES_DIR + ': ', select]));
+			if (bound) {
+				bar.appendChild(el('span', { class: 'cfg-bar-note', text: ' Changes are saved to the loaded instance. ' }));
+				bar.appendChild(button('Remove from the instance', () => {
+					if (!window.confirm('Remove ' + bound + ' from the loaded instance? The text stays in the editor.')) return;
+					clearTimeout(saveTimer);
+					saveTimer = null;
+					WS.remove(bound);
+					status.textContent = 'Removed ' + bound + ' from the loaded instance.';
+					bind(null);
+					writeDraft();
+					renderBar();
+				}, 'cfg-link cfg-danger'));
+			} else {
+				bar.append(' ', button('Add to the instance', addToInstance));
+			}
+			bar.append(' ', button('Download all (ZIP)', () => { if (saveTimer) save(); downloadZip(status); }), ' ', el('a', { href: '.', text: 'Overview' }));
+		}
+
+		fileInput.addEventListener('change', () => {
+			const file = fileInput.files[0];
+			fileInput.value = '';
+			if (!file) return;
+			const reader = new FileReader();
+			reader.onload = () => {
+				const text = String(reader.result).replace(/^﻿/, '');
+				if (!bound) nameInput.value = file.name.replace(/\.(md|markdown|txt)$/i, '');
+				editor.setValue(text);
+				status.textContent = 'Loaded ' + file.name + '.' + (bound ? ' It replaces ' + bound + ' in the loaded instance.' : '');
+			};
+			reader.readAsText(file);
+		});
+
+		box.appendChild(el('div', { class: 'cfg-actions' }, [
+			button('Download', () => {
+				editor.download(name() || 'page');
+				status.textContent = 'Downloaded ' + (name() || 'page') + '.md.';
+			}, 'cfg-button cfg-primary'),
+			button('Import a file…', () => fileInput.click()),
+			button('Start over', () => {
+				const wasBound = bound;
+				if (!window.confirm('Clear the page?' + (wasBound ? ' ' + wasBound + ' in the loaded instance stays as it is.' : ''))) return;
+				if (saveTimer) save();
+				try { localStorage.removeItem(draftKey); } catch (e) {}
+				bind(null);
+				show('', '');
+				status.textContent = 'The page was cleared.' + (wasBound ? ' ' + wasBound + ' in the loaded instance is unchanged.' : '');
+				renderBar();
+			}),
+			status,
+			fileInput,
+		]));
+
+		const requested = new URLSearchParams(window.location.search).get('file');
+		let stored = null;
+		try { stored = localStorage.getItem(boundKey); } catch (e) {}
+		const start = WS.active() ? [requested, requested === null ? stored : null].find((p) => p && WS.isPage(p) && WS.has(p)) : null;
+		if (start) open(start);
+		else openDraft();
+		renderBar();
+		WS.onChange(renderBar);
+	}
+
 	/* ---------- start page: load, check and download the instance ---------- */
 
-	const EDIT_PAGES = { 'instance.json': 'instance', 'categories.json': 'categories', 'places.json': 'places', 'holidays.json': 'holidays', 'sources/': 'source', 'inbox/': 'inbox' };
+	const EDIT_PAGES = { 'instance.json': 'instance', 'categories.json': 'categories', 'places.json': 'places', 'holidays.json': 'holidays', 'sources/': 'source', 'inbox/': 'inbox', 'site/pages/': PAGES_PAGE };
 
 	function editLink(path) {
 		if (EDIT_PAGES[path]) return '?page=' + EDIT_PAGES[path];
-		const folder = path.slice(0, path.indexOf('/') + 1);
-		return EDIT_PAGES[folder] ? '?page=' + EDIT_PAGES[folder] + '&file=' + encodeURIComponent(path) : '';
+		const folder = Object.keys(EDIT_PAGES).find((key) => key.slice(-1) === '/' && path.indexOf(key) === 0 && path.indexOf('/', key.length) < 0);
+		return folder ? '?page=' + EDIT_PAGES[folder] + '&file=' + encodeURIComponent(path) : '';
 	}
 
 	/* files and folders dropped onto the page: [{ path, file }] */
@@ -1793,7 +2008,7 @@
 		const content = el('div');
 
 		function forgetBindings() {
-			Object.keys(SPECS).forEach((name) => { try { localStorage.removeItem(BOUND_PREFIX + name); } catch (e) {} });
+			Object.keys(SPECS).concat([PAGES_PAGE]).forEach((name) => { try { localStorage.removeItem(BOUND_PREFIX + name); } catch (e) {} });
 		}
 
 		function confirmReplace() {
@@ -2015,5 +2230,7 @@
 		if (spec && spec.init) setUp(main, spec);
 		const box = main.querySelector('[data-cfg-workspace]');
 		if (box) setUpWorkspace(box);
+		const pages = main.querySelector('[data-cfg-pages]');
+		if (pages) setUpPages(pages);
 	});
 })();
