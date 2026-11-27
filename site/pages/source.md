@@ -138,6 +138,21 @@ Instance category* = ___
 [[ Add translation ]]
 :::
 
+### Category rules
+
+Set the category by pattern, for sources that file very different events
+under one category (workshops, markets and tours all under “Extra”). The
+rules are checked in order and the first match wins; without a match the
+category stays as it is. A rule on *category* sees the value after the
+category map.
+
+:::form
+Match field = {(title), location, organizer, category, description}
+Match pattern* = ___
+New category* = ___
+[[ Add category rule ]]
+:::
+
 ### Include and exclude rules
 
 *Include* keeps only events where at least one include rule matches;

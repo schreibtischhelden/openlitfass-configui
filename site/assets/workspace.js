@@ -212,6 +212,12 @@
 					path: path, where: 'category map “' + from + '”', value: obj.categoryMap[from],
 					set: (o, v) => { o.categoryMap[from] = v; },
 				}));
+				(Array.isArray(obj.categoryRules) ? obj.categoryRules : []).forEach((r, i) => {
+					if (r && typeof r.category === 'string') refs.push({
+						path: path, where: 'category rule “' + r.regex + '”', value: r.category,
+						set: (o, v) => { o.categoryRules[i].category = v; },
+					});
+				});
 				(Array.isArray(obj.categories) ? obj.categories : []).forEach((name, i) => refs.push({
 					path: path, where: 'allowed categories', value: name,
 					set: (o, v) => { o.categories[i] = v; },

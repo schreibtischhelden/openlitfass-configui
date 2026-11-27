@@ -1220,12 +1220,17 @@
 		{ name: 'source_category', key: 'from', placeholder: 'Konzert', hint: 'The source’s category name; matched case-insensitively.' },
 		{ name: 'instance_category', key: 'to', datalist: 'cfg-instance-categories', placeholder: 'Kultur', hint: 'One of the instance’s categories.' },
 	];
+	const CATEGORY_RULE = [
+		{ name: 'match_field', key: 'field' },
+		{ name: 'match_pattern', key: 'regex', placeholder: '(?i)workshop|bastel', hint: 'Go syntax; (?i) makes it case-insensitive, \\b marks a word boundary (“Aufführung” is not a “Führung”).' },
+		{ name: 'new_category', key: 'category', datalist: 'cfg-instance-categories', placeholder: 'Mitmachen', hint: 'One of the instance’s categories.' },
+	];
 	const MATCH = [
 		{ name: 'rule', key: 'kind' },
 		{ name: 'field', key: 'field' },
 		{ name: 'pattern', key: 'regex', placeholder: '(?i)weißensee|1308[68]', hint: 'Go syntax; (?i) makes it case-insensitive.' },
 	];
-	const SOURCE_ORDER = ['name', 'label', 'homepage', 'priority', 'preset', 'params', 'type', 'url', 'disabled', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'daysAhead', 'categories', 'include', 'exclude', 'wcsTypeIds', 'organizer', 'locationDefault', 'icalUTCAs', 'categoryMap', 'familyFriendly', 'place', 'images'];
+	const SOURCE_ORDER = ['name', 'label', 'homepage', 'priority', 'preset', 'params', 'type', 'url', 'disabled', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'daysAhead', 'categories', 'include', 'exclude', 'wcsTypeIds', 'organizer', 'locationDefault', 'icalUTCAs', 'categoryMap', 'categoryRules', 'familyFriendly', 'place', 'images'];
 
 	// the example instance's templates (sources/*.example.json)
 	const SOURCE_TEMPLATES = {
@@ -1296,6 +1301,8 @@
 		const map = {};
 		ctx.categoryMap.items().forEach((m) => { map[m.from] = m.to; });
 		if (!isEmpty(map)) obj.categoryMap = map;
+		const rules = ctx.categoryRules.items().map((r) => ({ field: r.field, regex: r.regex, category: r.category }));
+		if (rules.length) obj.categoryRules = rules;
 		return obj;
 	}
 
@@ -1349,6 +1356,17 @@
 					{ label: 'Instance', render: (m) => m.to || '' },
 				],
 				check: (m) => (m.to ? '' : 'Give the instance’s category.'),
+			});
+			ctx.categoryRules = listEditor(ctx, {
+				anchor: 'match_pattern', descs: CATEGORY_RULE, key: null,
+				label: (r) => r.field + ' ' + r.regex + ' → ' + r.category,
+				empty: 'No rules: categories come from the source and the category map.',
+				columns: [
+					{ label: 'Field', render: (r) => r.field },
+					{ label: 'Regex', render: (r) => el('code', { text: r.regex || '' }) },
+					{ label: 'Category', render: (r) => r.category || '' },
+				],
+				check: (r) => (r.category && r.category.trim() ? '' : 'Give the category the rule sets.'),
 			});
 			ctx.matches = listEditor(ctx, {
 				anchor: 'pattern', descs: MATCH, key: null,
@@ -1501,6 +1519,7 @@
 				ctx.extract.set([]);
 				ctx.rules.set([]);
 				ctx.categoryMap.set(Object.keys(obj.categoryMap || {}).map((from) => ({ from: from, to: obj.categoryMap[from] })));
+				ctx.categoryRules.set((Array.isArray(obj.categoryRules) ? obj.categoryRules : []).map((r) => Object.assign({}, r)));
 				ctx.matches.set((obj.include || []).map((m) => Object.assign({ kind: 'include' }, m)).concat((obj.exclude || []).map((m) => Object.assign({ kind: 'exclude' }, m))));
 				ctx.syncSections();
 				return;
@@ -1513,6 +1532,7 @@
 			ctx.rules.set(Object.keys(mapping).filter((t) => t !== 'price').map((t) => Object.assign({ target: t }, mapping[t])));
 			writeObject(formOf(ctx.main, 'amount_path'), PRICE, mapping.price || {});
 			ctx.categoryMap.set(Object.keys(obj.categoryMap || {}).map((from) => ({ from: from, to: obj.categoryMap[from] })));
+			ctx.categoryRules.set((Array.isArray(obj.categoryRules) ? obj.categoryRules : []).map((r) => Object.assign({}, r)));
 			ctx.matches.set((obj.include || []).map((m) => Object.assign({ kind: 'include' }, m)).concat((obj.exclude || []).map((m) => Object.assign({ kind: 'exclude' }, m))));
 			ctx.syncSections();
 		},
@@ -1580,6 +1600,7 @@
 	function sourceRefProblems(obj) {
 		const catRefs = [];
 		Object.keys(obj.categoryMap || {}).forEach((from) => catRefs.push({ where: 'Category map “' + from + '”', value: obj.categoryMap[from] }));
+		(obj.categoryRules || []).forEach((r) => { if (r && r.category) catRefs.push({ where: 'Category rule “' + r.regex + '”', value: r.category }); });
 		(obj.categories || []).forEach((name) => catRefs.push({ where: 'Allowed categories', value: name }));
 		const mapping = obj.mapping || {};
 		if (mapping.category && mapping.category.default) catRefs.push({ where: 'Field mapping, category default', value: mapping.category.default });
