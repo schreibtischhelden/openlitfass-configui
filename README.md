@@ -22,6 +22,7 @@ site/
   README.md            start page
   pages/<name>.md      one page per config file, reachable as ?page=<name>
   header.md            sidebar: logo, navigation
+  menu.json            menu entries; the current page also lists its sections
   footer.md            footer
   404.md               shown for an unknown ?page=
   index.html           page shell with the Content Security Policy

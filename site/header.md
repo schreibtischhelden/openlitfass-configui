@@ -3,10 +3,4 @@
 
 #### Config files
 
-- [Start](.)
-- [instance.json](?page=instance)
-- [categories.json](?page=categories)
-- [places.json](?page=places)
-- [holidays.json](?page=holidays)
-- [Inbox event](?page=inbox)
-- [Source](?page=source)
+<nav data-mdp-menu="tree" data-mdp-menu-toc data-mdp-toc-live aria-label="Config files"></nav>

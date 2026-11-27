@@ -5,7 +5,6 @@
 	'use strict';
 
 	var THEME_KEY = 'ol-config-theme';
-	var currentPage = new URLSearchParams(window.location.search).get('page') || '';
 
 	function onRendered(region, callback) {
 		document.addEventListener('mdp:rendered', function (event) {
@@ -13,27 +12,11 @@
 		});
 	}
 
-	function pageOf(href) {
-		if (href === '.' || href === './') return '';
-		var match = /[?&]page=([^&#]+)/.exec(href || '');
-		return match ? decodeURIComponent(match[1]) : null;
-	}
-
 	function systemTheme() {
 		return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 	}
 
 	function enhanceSidebar(header) {
-		var nav = document.createElement('nav');
-		nav.setAttribute('aria-label', 'Config files');
-		Array.prototype.slice.call(header.children).forEach(function (child) {
-			if (child.tagName === 'H4' || child.tagName === 'UL') nav.appendChild(child);
-		});
-		header.appendChild(nav);
-		nav.querySelectorAll('a').forEach(function (link) {
-			if (pageOf(link.getAttribute('href')) === currentPage) link.setAttribute('aria-current', 'page');
-		});
-
 		var toggle = document.createElement('button');
 		toggle.type = 'button';
 		toggle.className = 'theme-toggle';
@@ -62,6 +45,12 @@
 		button.addEventListener('click', function () {
 			var open = sidebar.classList.toggle('open');
 			button.setAttribute('aria-expanded', String(open));
+		});
+		// a section link only scrolls, so the open drawer would cover the target
+		sidebar.addEventListener('click', function (event) {
+			if (!sidebar.classList.contains('open') || !event.target.closest('a[href^="#"]')) return;
+			sidebar.classList.remove('open');
+			button.setAttribute('aria-expanded', 'false');
 		});
 	}
 

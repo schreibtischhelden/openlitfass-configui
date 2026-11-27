@@ -123,6 +123,15 @@ header li a[aria-current="page"] {
 	box-shadow: inset 3px 0 0 var(--accent);
 }
 
+/* sections of the current page, below its menu entry */
+header .mdp-menu-toc {
+	margin: .15rem 0 .5rem .6rem; padding-left: .5rem;
+	border-left: 1px solid var(--border); font-size: .86rem;
+}
+header .mdp-menu-toc .mdp-menu-toc, header .mdp-menu-toc ul { margin: 0 0 0 .5rem; padding-left: 0; border: 0; }
+header .mdp-menu-toc a { padding: .1rem .5rem; color: var(--muted); }
+header .mdp-menu-toc a:hover { color: var(--text); }
+
 
 .theme-toggle {
 	margin-top: 1.5rem; padding: .35rem .7rem; font: inherit; font-size: .85rem;
