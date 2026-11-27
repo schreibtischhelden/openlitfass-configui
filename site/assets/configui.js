@@ -432,7 +432,7 @@
 
 		function load(obj) {
 			main.querySelectorAll('form').forEach((form) => form.reset());
-			const known = spec.keys ? spec.keys() : [];
+			const known = spec.keys ? spec.keys(obj) : [];
 			ctx.extras = {};
 			Object.keys(obj).forEach((key) => { if (known.indexOf(key) < 0 && (spec.drop || []).indexOf(key) < 0) ctx.extras[key] = obj[key]; });
 			spec.load(ctx, obj);
@@ -1031,6 +1031,134 @@
 		},
 	};
 
+	/* ---------- holidays.json ---------- */
+
+	const DAY_LIST = [
+		{ name: 'list_name', key: 'name', placeholder: 'feiertage', hint: 'Used in “Additional dates” and “Except” of inbox events. Must not look like a day (easter, 12-25).' },
+		{ name: 'days', key: 'days', type: 'list', placeholder: '01-01, 05-01, 12-25, easter+1, ostern', hint: 'Comma-separated: YYYY-MM-DD (once), MM-DD (every year), *-DD (every month), easter±N (days from Easter Sunday) or the name of another list.' },
+	];
+
+	function easterSunday(year) {
+		const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+		const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+		const g = Math.floor((b - f + 1) / 3);
+		const h = (19 * a + b - d - g + 15) % 30;
+		const i = Math.floor(c / 4), k = c % 4;
+		const l = (32 + 2 * e + 2 * i - h - k) % 7;
+		const m = Math.floor((a + 11 * h + 22 * l) / 451);
+		return new Date(Date.UTC(year, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1));
+	}
+
+	/* the days of `entries` in `year`, as sorted UTC dates; lists are
+	   followed, unknown entries and cycles are skipped */
+	function daysInYear(entries, lists, year) {
+		const out = {};
+		const add = (date) => { if (date.getUTCFullYear() === year) out[date.getTime()] = date; };
+		const walk = (list, path) => list.forEach((entry) => {
+			const name = String(entry).trim();
+			if (name in lists) {
+				if (path.indexOf(name) < 0) walk(lists[name], path.concat([name]));
+				return;
+			}
+			const p = WS.parseDay(name);
+			if (!p) return;
+			if (p.kind === 'once' && p.year === year) add(new Date(Date.UTC(year, p.month - 1, p.day)));
+			if (p.kind === 'yearly') {
+				const date = new Date(Date.UTC(year, p.month - 1, p.day));
+				if (date.getUTCDate() === p.day) add(date);
+			}
+			if (p.kind === 'monthly') {
+				for (let month = 0; month < 12; month++) {
+					const date = new Date(Date.UTC(year, month, p.day));
+					if (date.getUTCDate() === p.day) add(date);
+				}
+			}
+			if (p.kind === 'easter') {
+				const date = easterSunday(year);
+				date.setUTCDate(date.getUTCDate() + p.offset);
+				add(date);
+			}
+		});
+		walk(entries, []);
+		return Object.keys(out).map((t) => out[t]).sort((x, y) => x - y);
+	}
+
+	function daysPreview(entries, lists, year) {
+		const days = daysInYear(entries, lists, year);
+		if (!days.length) return el('span', { class: 'cfg-muted', text: '–' });
+		const format = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+		const all = days.map((d) => format.format(d));
+		const shown = all.length > 8 ? all.slice(0, 8).join(', ') + ', … (' + all.length + ' days)' : all.join(', ');
+		return el('span', { title: all.join('\n'), text: shown });
+	}
+
+	function listsOf(items) {
+		const lists = {};
+		items.forEach((item) => { lists[item.name] = item.days || []; });
+		return lists;
+	}
+
+	SPECS.holidays = {
+		file: 'holidays.json',
+		keys: (obj) => Object.keys(WS.dayLists(obj)),
+		init: (ctx) => {
+			const year = new Date().getFullYear();
+			const columns = [
+				{ label: 'Name', render: (item) => el('code', { text: item.name }) },
+				{ label: 'Days', render: (item) => (item.days || []).join(', ') },
+				{ label: 'In ' + year, render: (item) => daysPreview(item.days || [], listsOf(ctx.list.items()), year) },
+			];
+			if (WS.active()) columns.push({ label: 'Used in', render: (item) => usedIn(WS.dayListRefs(), item.name) });
+			ctx.list = listEditor(ctx, {
+				anchor: 'list_name', descs: DAY_LIST, key: 'name',
+				empty: 'No day lists yet. Add the first one above.',
+				columns: columns,
+				check: (item) => {
+					if (WS.parseDay(item.name)) return 'The name “' + item.name + '” looks like a day; pick another name.';
+					if ((item.days || []).some((d) => d.trim() === item.name)) return 'A list cannot contain itself.';
+					return '';
+				},
+				onRename: (from, to, items) => {
+					items.forEach((other) => {
+						if (other.days) other.days = other.days.map((d) => (d.trim() === from ? to : d));
+					});
+					return renameElsewhere('day list', from, to, WS.dayListRefs(), WS.renameDayList);
+				},
+				removeNote: (item) => {
+					const users = ctx.list.items().filter((other) => (other.days || []).some((d) => d.trim() === item.name)).map((other) => other.name);
+					const notes = [];
+					if (users.length) notes.push('It is part of ' + users.join(', ') + '.');
+					notes.push(removeNote(WS.dayListRefs(), item.name, 'An unknown name makes the whole inbox fail.'));
+					return notes.filter(Boolean).join('\n');
+				},
+			});
+		},
+		build: (ctx) => {
+			const obj = {};
+			ctx.list.items().forEach((item) => { obj[item.name] = item.days || []; });
+			return obj;
+		},
+		load: (ctx, obj) => {
+			const lists = WS.dayLists(obj);
+			ctx.list.set(Object.keys(lists).map((name) => ({ name: name, days: lists[name] })));
+		},
+		validate: (obj) => {
+			const p = WS.dayListProblems(obj);
+			const refs = WS.active() ? WS.dayListRefs() : [];
+			const names = Object.keys(WS.dayLists(obj));
+			refs.forEach((r) => { if (names.indexOf(r.value) < 0) p.push(r.path + ', ' + r.where + ': “' + r.value + '” is not one of these lists.'); });
+			return p;
+		},
+	};
+
+	/* the instance's day lists, from the loaded instance or the holidays draft */
+	function knownDayLists() {
+		if (WS.active()) return { names: WS.dayListNames() || [], from: WS.has('holidays.json') ? 'holidays.json of the loaded instance' : 'the loaded instance (it has no holidays.json)' };
+		const draft = draftOf('holidays');
+		if (draft && Object.keys(WS.dayLists(draft)).length) return { names: Object.keys(WS.dayLists(draft)), from: 'your holidays.json draft' };
+		return null;
+	}
+
 	/* ---------- inbox/<name>.json ---------- */
 
 	const INBOX = [
@@ -1057,7 +1185,7 @@
 		{ name: 'price', type: 'meta' },
 		{ name: 'amount_in_euros', type: 'meta', attrs: { step: '0.01', min: '0' } },
 	];
-	const DAY = /^(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}|\*-\d{2}|easter([+-]\d+)?|[a-zäöüß][\wäöüß-]*)$/i;
+	const DAY_LIST_NAME = /^[a-zäöüß][\wäöüß-]*$/i;
 	const INBOX_ORDER = ['title', 'date', 'startTime', 'endTime', 'category', 'description', 'location', 'organizer', 'url', 'image', 'price', 'ticketRequired', 'registrationRequired', 'familyFriendly', 'cancelled', 'place', 'repeat'];
 
 	function fileStem(name) {
@@ -1128,7 +1256,12 @@
 				if (r.until && !RE.date.test(r.until) && !RE.monthDay.test(r.until)) p.push('Until must be YYYY-MM-DD or MM-DD.');
 				if (r.from && r.until && RE.monthDay.test(r.from) !== RE.monthDay.test(r.until)) p.push('From and Until must use the same form (both dates, or both month and day).');
 				if (r.from && RE.monthDay.test(r.from) && !r.until) p.push('A season (MM-DD) needs Until.');
-				(r.dates || []).concat(r.except || []).forEach((day) => { if (!DAY.test(day)) p.push('“' + day + '” is not a day (YYYY-MM-DD, MM-DD, *-DD, easter±N or a day list).'); });
+				const lists = knownDayLists();
+				(r.dates || []).concat(r.except || []).forEach((day) => {
+					if (WS.parseDay(day)) return;
+					if (!DAY_LIST_NAME.test(day)) p.push('“' + day + '” is not a day (YYYY-MM-DD, MM-DD, *-DD, easter±N or a day list).');
+					else if (lists && lists.names.indexOf(day) < 0) p.push('“' + day + '” is neither a day nor a list in ' + lists.from + '; the inbox would fail.');
+				});
 				if (!r.weekdays && !r.dates) p.push('A recurring event needs weekdays or additional dates.');
 			}
 			return p.concat(refProblems(
@@ -1612,7 +1745,7 @@
 
 	/* ---------- start page: load, check and download the instance ---------- */
 
-	const EDIT_PAGES = { 'instance.json': 'instance', 'categories.json': 'categories', 'places.json': 'places', 'sources/': 'source', 'inbox/': 'inbox' };
+	const EDIT_PAGES = { 'instance.json': 'instance', 'categories.json': 'categories', 'places.json': 'places', 'holidays.json': 'holidays', 'sources/': 'source', 'inbox/': 'inbox' };
 
 	function editLink(path) {
 		if (EDIT_PAGES[path]) return '?page=' + EDIT_PAGES[path];

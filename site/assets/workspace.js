@@ -251,6 +251,91 @@
 		return refs;
 	}
 
+	/* ---------- day patterns and day lists (holidays.json) ---------- */
+
+	/* one day pattern as the core reads it (internal/sources/days.go):
+	   YYYY-MM-DD, MM-DD, *-DD or easter±N; null if it is none of them */
+	function parseDay(text) {
+		const s = String(text).trim();
+		const easter = /^easter(?:([+-]\d+))?$/.exec(s);
+		if (easter) return { kind: 'easter', offset: easter[1] ? parseInt(easter[1], 10) : 0 };
+		if (s.indexOf('easter') === 0) return null;
+		const valid = (y, m, d) => {
+			const date = new Date(Date.UTC(y, m - 1, d));
+			return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+		};
+		let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+		if (m && valid(+m[1], +m[2], +m[3])) return { kind: 'once', year: +m[1], month: +m[2], day: +m[3] };
+		m = /^\*-(\d{2})$/.exec(s);
+		if (m && +m[1] >= 1 && +m[1] <= 31) return { kind: 'monthly', day: +m[1] };
+		// 2000 is a leap year, so 02-29 is accepted
+		m = /^(\d{2})-(\d{2})$/.exec(s);
+		if (m && valid(2000, +m[1], +m[2])) return { kind: 'yearly', month: +m[1], day: +m[2] };
+		return null;
+	}
+
+	/* the named lists of a holidays.json object (only array values count) */
+	function dayLists(obj) {
+		const lists = {};
+		Object.keys(obj || {}).forEach((name) => { if (Array.isArray(obj[name])) lists[name] = obj[name].map(String); });
+		return lists;
+	}
+
+	/* what the core would reject in holidays.json: names that look like a
+	   day, values that are no list, unknown entries, lists that include
+	   themselves */
+	function dayListProblems(obj) {
+		const problems = [];
+		const lists = dayLists(obj);
+		Object.keys(obj || {}).forEach((name) => {
+			if (!Array.isArray(obj[name])) problems.push('“' + name + '” is not a list of days.');
+			if (parseDay(name)) problems.push('The list name “' + name + '” looks like a day; pick another name.');
+		});
+		Object.keys(lists).forEach((name) => {
+			lists[name].forEach((entry) => {
+				if (!parseDay(entry) && !(entry.trim() in lists)) problems.push('“' + name + '”: “' + entry + '” is neither a day (YYYY-MM-DD, MM-DD, *-DD, easter±N) nor a list.');
+			});
+		});
+		const reported = {};
+		const walk = (name, path) => {
+			if (path.indexOf(name) >= 0) {
+				const cycle = path.slice(path.indexOf(name)).concat([name]);
+				const key = cycle.slice(0, -1).slice().sort().join('\n');
+				if (!reported[key]) {
+					reported[key] = true;
+					problems.push('The list “' + name + '” includes itself (' + cycle.join(' → ') + ').');
+				}
+				return;
+			}
+			lists[name].forEach((entry) => { if (entry.trim() in lists) walk(entry.trim(), path.concat([name])); });
+		};
+		Object.keys(lists).forEach((name) => walk(name, []));
+		return problems;
+	}
+
+	function dayListNames() {
+		const obj = get('holidays.json');
+		return obj ? Object.keys(dayLists(obj)) : null;
+	}
+
+	/* every entry of an inbox file's dates/except that names a day list */
+	function dayListRefs(only) {
+		const refs = [];
+		sortedPaths().forEach((path) => {
+			if (path.indexOf('inbox/') !== 0 || (only && path !== only)) return;
+			const obj = get(path);
+			const repeat = obj && obj.repeat;
+			if (!repeat || typeof repeat !== 'object') return;
+			['dates', 'except'].forEach((key) => {
+				(Array.isArray(repeat[key]) ? repeat[key] : []).forEach((entry, i) => {
+					if (typeof entry !== 'string' || parseDay(entry)) return;
+					refs.push({ path: path, where: key === 'dates' ? 'additional dates' : 'except', value: entry.trim(), set: (o, v) => { o.repeat[key][i] = v; } });
+				});
+			});
+		});
+		return refs;
+	}
+
 	/* renames value in all refs; returns the changed paths */
 	function rename(refs, from, to, skip) {
 		const changed = {};
@@ -282,6 +367,12 @@
 				if (places.indexOf(r.value) < 0) problems.push({ path: r.path, text: r.where + ': “' + r.value + '” is not an id or ref in places.json.' });
 			});
 		}
+		const holidays = get('holidays.json');
+		if (holidays) dayListProblems(holidays).forEach((text) => problems.push({ path: 'holidays.json', text: text }));
+		const lists = dayListNames() || [];
+		dayListRefs().forEach((r) => {
+			if (lists.indexOf(r.value) < 0) problems.push({ path: r.path, text: r.where + ': “' + r.value + '” is neither a day nor a list in holidays.json' + (holidays ? '' : ' (there is none)') + '.' });
+		});
 		return problems;
 	}
 
@@ -314,6 +405,12 @@
 		placeRefs: placeRefs,
 		renameCategory: (from, to, skip) => rename(categoryRefs(), from, to, skip),
 		renamePlace: (from, to, skip) => rename(placeRefs(), from, to, skip),
+		parseDay: parseDay,
+		dayLists: dayLists,
+		dayListProblems: dayListProblems,
+		dayListNames: dayListNames,
+		dayListRefs: dayListRefs,
+		renameDayList: (from, to, skip) => rename(dayListRefs(), from, to, skip),
 		check: check,
 		instanceName: instanceName,
 		loadedAt: () => (state ? state.loaded : null),

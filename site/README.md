@@ -18,8 +18,11 @@ single files or a ZIP. Then:
   pages can pick one of them;
 - the category and place fields of sources and inbox events suggest the
   instance's categories and places and warn about unknown ones;
-- renaming a category or a place id offers to change it in every file
-  that uses it, and removing one tells you where it is still used;
+- the dates and exceptions of inbox events are checked against the day
+  lists of `holidays.json`;
+- renaming a category, a place id or a day list offers to change it in
+  every file that uses it, and removing one tells you where it is still
+  used;
 - *Download all (ZIP)* gives you the whole configuration back, in the
   folder layout of the instance. Files you did not change come back
   exactly as they were.
@@ -36,6 +39,7 @@ Only the configuration is read: `instance.json`, `categories.json`,
 <a href="?page=instance"><strong>instance.json</strong>Name, texts, time zone, colour and links of the instance.</a>
 <a href="?page=categories"><strong>categories.json</strong>Categories, their icons and groups.</a>
 <a href="?page=places"><strong>places.json</strong>Place types and places for the tab “Orte”.</a>
+<a href="?page=holidays"><strong>holidays.json</strong>Named day lists, such as holidays, for recurring inbox events.</a>
 <a href="?page=inbox"><strong>Inbox event</strong>A single or recurring event added by hand.</a>
 <a href="?page=source"><strong>Source</strong>An iCalendar, RSS, JSON, HTML or WordPress source with its field mapping and filters, or a preset of the core.</a>
 </div>
@@ -53,6 +57,7 @@ Only the configuration is read: `instance.json`, `categories.json`,
 | `instance.json` | the instance directory |
 | `categories.json` | the instance directory |
 | `places.json` | the instance directory |
+| `holidays.json` | the instance directory |
 | an inbox event | `inbox/<name>.json` |
 | a source | `sources/<name>.json` |
 
