@@ -5,17 +5,31 @@
    Addresses: <server>/<owner>/<repo>[/src/branch/<branch>[/<folder>]] */
 (function () {
 	'use strict';
+	const PER_PAGE = 50;
+	const REF_PAGES = 20;
+
 	window.OLRepo.register('forgejo', {
 		example: '{server}/owner/repository',
 
 		parse(parts) {
 			if (parts.length < 2) return null;
-			const repo = { project: parts[0] + '/' + parts[1].replace(/\.git$/, ''), ref: '', dir: '' };
-			if (parts[2] === 'src' && ['branch', 'tag', 'commit'].indexOf(parts[3]) >= 0 && parts[4]) {
-				repo.ref = parts[4];
-				repo.dir = parts.slice(5).join('/');
+			const kind = parts[2] === 'src' && ['branch', 'tag', 'commit'].indexOf(parts[3]) >= 0 ? parts[3] : '';
+			return { project: parts[0] + '/' + parts[1].replace(/\.git$/, ''), kind: kind, rest: kind ? parts.slice(4) : [] };
+		},
+
+		/* all branches or all tags, as the address says; the API has no
+		   search, so they are read page by page */
+		async refs(repo, http) {
+			if (repo.kind === 'commit') return null;
+			const api = repo.server + '/api/v1/repos/' + repo.project + (repo.kind === 'tag' ? '/tags' : '/branches');
+			const names = [];
+			for (let page = 1; page <= REF_PAGES; page++) {
+				const items = await http.json(api + '?limit=' + PER_PAGE + '&page=' + page, 'the branches of ' + repo.project);
+				if (!Array.isArray(items)) break;
+				items.forEach((item) => names.push(String(item.name)));
+				if (items.length < PER_PAGE) break;
 			}
-			return repo;
+			return names;
 		},
 
 		async list(repo, http) {

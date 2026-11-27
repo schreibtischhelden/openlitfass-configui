@@ -3,7 +3,12 @@
    loaded only when it is used; a preset is a plugin plus a server. The
    plugins list the repository and read files with plain GET requests, so
    the host has to allow cross-origin reads (CORS); whether it does is up to
-   its operator. Nothing is sent to the host except these requests. */
+   its operator. Nothing is sent to the host except these requests.
+   A plugin registers { example, parse(parts), refs(repo, http), list(repo,
+   http) }: parse splits the path of an address into the project and the
+   rest after the branch marker (tree/, -/tree/, src/branch/), refs
+   names the branches or tags the rest may start with (null: no lookup),
+   list gives the files of repo.dir on repo.ref as [{ path, read }]. */
 (function () {
 	'use strict';
 
@@ -118,10 +123,18 @@
 		return results;
 	}
 
-	/* → { entries: [{ path, read }], origin: { preset, url, label } } with
-	   every wanted file already read, so that a failure leaves the loaded
-	   instance alone */
-	async function load(presetId, input) {
+	function startsWith(parts, name) {
+		const head = name.split('/');
+		return head.length <= parts.length && head.every((s, i) => s === parts[i]);
+	}
+
+	/* Which branch and folder an address means. After …/tree/ the branch and
+	   the folder are not told apart (feat/x/instance), so the branches and
+	   tags are looked up, as the hosts' own web pages do: the longest name
+	   the rest starts with is the branch. A branch given in its own field
+	   wins; the folder stays the one the address names.
+	   → { preset, plugin, repo: { server, project, ref, dir }, url, guessed } */
+	async function analyse(presetId, input, branch) {
 		const target = resolve(presetId, input);
 		const plugin = await loadPlugin(target.preset.type);
 		const repo = plugin.parse(target.parts);
@@ -129,22 +142,54 @@
 			throw new Error('That address does not point to a repository. Example: ' + plugin.example.replace('{server}', target.preset.server || 'https://git.example.org'));
 		}
 		repo.server = target.server;
-		repo.dir = (repo.dir || '').replace(/^\/+|\/+$/g, '');
+		const rest = repo.rest || [];
+		const given = String(branch || '').trim();
+		let inAddress = given && startsWith(rest, given) ? given : '';
+		let guessed = false;
+		if (!inAddress && rest.length > 1) {
+			const names = await plugin.refs(repo, http);
+			if (names) {
+				inAddress = names.filter((name) => startsWith(rest, name)).sort((a, b) => b.length - a.length)[0] || '';
+				guessed = !inAddress && !given;
+			}
+		}
+		if (!inAddress && rest.length) inAddress = rest[0];
+		repo.ref = given || inAddress;
+		repo.dir = inAddress ? rest.slice(inAddress.split('/').length).join('/') : '';
+		return { preset: target.preset, plugin: plugin, repo: repo, url: target.url, guessed: guessed };
+	}
+
+	/* → { entries: [{ path, read }], origin: { preset, url, ref, label } }
+	   with every wanted file already read, so that a failure leaves the
+	   loaded instance alone */
+	async function load(presetId, input, branch) {
+		const target = await analyse(presetId, input, branch);
+		const plugin = target.plugin;
+		const repo = target.repo;
 		const files = (await plugin.list(repo, http)).filter((f) => WANTED.test(f.path));
 		if (!files.length) {
-			throw new Error('No configuration files in ' + target.url + '. The repository (or the folder in the address) has to hold instance.json, sources/ and inbox/.');
+			throw new Error('No configuration files in ' + describe(target) + '. The repository (or the folder in the address) has to hold instance.json, sources/ and inbox/.');
 		}
 		const texts = await pool(files, (f) => f.read());
 		return {
 			entries: files.map((f, i) => ({ path: f.path, read: () => Promise.resolve(texts[i]) })),
-			origin: { preset: target.preset.id, url: target.url, label: target.url.replace(/^https:\/\//, '') },
+			origin: { preset: target.preset.id, url: target.url, ref: repo.ref, label: describe(target) },
 		};
+	}
+
+	function describe(target) {
+		const repo = target.repo;
+		return new URL(repo.server).host + '/' + repo.project
+			+ ', ' + (repo.ref ? 'branch ' + repo.ref : 'the default branch')
+			+ (repo.dir ? ', folder ' + repo.dir : '');
 	}
 
 	window.OLRepo = {
 		presets: () => PRESETS.slice(),
 		preset: preset,
 		register: register,
+		analyse: analyse,
+		describe: describe,
 		load: load,
 	};
 })();

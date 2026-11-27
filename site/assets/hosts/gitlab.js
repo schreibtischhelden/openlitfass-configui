@@ -14,12 +14,18 @@
 			const path = dash >= 0 ? parts.slice(0, dash) : parts;
 			if (path.length < 2) return null;
 			path[path.length - 1] = path[path.length - 1].replace(/\.git$/, '');
-			const repo = { project: path.join('/'), ref: '', dir: '' };
-			if (dash >= 0 && parts[dash + 1] === 'tree' && parts[dash + 2]) {
-				repo.ref = parts[dash + 2];
-				repo.dir = parts.slice(dash + 3).join('/');
+			return { project: path.join('/'), rest: dash >= 0 && parts[dash + 1] === 'tree' ? parts.slice(dash + 2) : [] };
+		},
+
+		/* branches, then tags, whose names start with the first part */
+		async refs(repo, http) {
+			const api = repo.server + '/api/v4/projects/' + encodeURIComponent(repo.project) + '/repository/';
+			for (const kind of ['branches', 'tags']) {
+				const items = await http.json(api + kind + '?per_page=' + PER_PAGE + '&search=' + encodeURIComponent('^' + repo.rest[0]), 'the branches of ' + repo.project);
+				const names = (Array.isArray(items) ? items : []).map((item) => String(item.name));
+				if (names.length) return names;
 			}
-			return repo;
+			return [];
 		},
 
 		async list(repo, http) {

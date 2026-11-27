@@ -1676,17 +1676,17 @@
 			await importAndReport(entries, replace);
 		}
 
-		async function loadRepo(presetId, address) {
+		async function loadRepo(presetId, address, branch) {
 			if (!confirmReplace()) return;
 			status.textContent = 'Loading from the repository…';
 			let result;
 			try {
-				result = await window.OLRepo.load(presetId, address);
+				result = await window.OLRepo.load(presetId, address, branch);
 			} catch (e) {
 				status.textContent = e.message;
 				return;
 			}
-			try { localStorage.setItem(REPO_KEY, JSON.stringify({ preset: result.origin.preset, url: address })); } catch (e) {}
+			try { localStorage.setItem(REPO_KEY, JSON.stringify({ preset: result.origin.preset, url: address, ref: result.origin.ref })); } catch (e) {}
 			repoForm.hidden = true;
 			await importAndReport(result.entries, true, result.origin);
 		}
@@ -1709,12 +1709,18 @@
 
 		const repoHost = el('select', { id: 'cfg-repo-host' }, window.OLRepo.presets().map((p) => el('option', { value: p.id, text: p.label })));
 		const repoAddress = el('input', { id: 'cfg-repo-address', type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false', required: '' });
+		const repoBranch = el('input', { id: 'cfg-repo-branch', type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: 'the default branch' });
+		const repoTarget = el('p', { class: 'cfg-hint cfg-repo-target', 'aria-live': 'polite' });
 		const repoForm = el('form', { class: 'cfg-repo', hidden: '', novalidate: '' }, [
 			el('label', { for: 'cfg-repo-host', text: 'Hosting' }),
 			repoHost,
 			el('label', { for: 'cfg-repo-address', text: 'Repository' }),
 			repoAddress,
 			el('p', { class: 'cfg-hint', text: 'A public repository, its address as copied from the browser. It may name a branch and the folder of the instance (…/tree/main/instance). The page reads instance.json, categories.json, places.json, holidays.json, sources/ and inbox/ straight from the server; the server has to allow that (CORS).' }),
+			el('label', { for: 'cfg-repo-branch', text: 'Branch' }),
+			repoBranch,
+			el('p', { class: 'cfg-hint', text: 'Filled in from the address; change it to read another branch or tag.' }),
+			repoTarget,
 			el('p', { class: 'cfg-actions' }, [
 				el('button', { type: 'submit', class: 'cfg-button cfg-primary', text: 'Load' }),
 				button('Cancel', () => { repoForm.hidden = true; }),
@@ -1727,26 +1733,59 @@
 			forgejo: 'https://git.example.org/owner/repository',
 		};
 		const showPlaceholder = () => repoAddress.setAttribute('placeholder', placeholders[repoHost.value] || '');
-		repoHost.addEventListener('change', showPlaceholder);
+
+		/* the address decides the branch field; the branch field only the
+		   note. Only an address with more than a branch after tree/ costs a
+		   request (the branch lookup); a newer run makes older ones moot. */
+		let analysis = 0;
+		let addressTimer = null;
+		async function showTarget(fromAddress) {
+			const run = ++analysis;
+			if (!repoAddress.value.trim()) {
+				repoTarget.textContent = '';
+				if (fromAddress) repoBranch.value = '';
+				return;
+			}
+			repoTarget.textContent = 'Checking the address…';
+			try {
+				const target = await window.OLRepo.analyse(repoHost.value, repoAddress.value, fromAddress ? '' : repoBranch.value);
+				if (run !== analysis) return;
+				if (fromAddress) repoBranch.value = target.repo.ref;
+				repoTarget.textContent = 'Reads ' + window.OLRepo.describe(target) + '.'
+					+ (target.guessed ? ' No branch or tag of that name was found; check the branch.' : '');
+			} catch (e) {
+				if (run === analysis) repoTarget.textContent = e.message;
+			}
+		}
+		repoHost.addEventListener('change', () => { showPlaceholder(); showTarget(true); });
 		repoAddress.addEventListener('input', () => {
 			const match = window.OLRepo.presets().find((p) => p.server && repoAddress.value.trim().indexOf(p.server + '/') === 0);
 			if (match && repoHost.value !== match.id) {
 				repoHost.value = match.id;
 				showPlaceholder();
 			}
+			clearTimeout(addressTimer);
+			addressTimer = setTimeout(() => showTarget(true), 600);
+		});
+		repoBranch.addEventListener('input', () => {
+			clearTimeout(addressTimer);
+			addressTimer = setTimeout(() => showTarget(false), 600);
 		});
 		repoForm.addEventListener('submit', (event) => {
 			event.preventDefault();
-			loadRepo(repoHost.value, repoAddress.value);
+			clearTimeout(addressTimer);
+			loadRepo(repoHost.value, repoAddress.value, repoBranch.value);
 		});
 		function openRepoForm() {
 			let last = WS.origin();
 			if (!last) {
 				try { last = JSON.parse(localStorage.getItem(REPO_KEY) || 'null'); } catch (e) {}
 			}
-			if (last && window.OLRepo.preset(last.preset)) {
+			if (last && window.OLRepo.preset(last.preset) && !repoAddress.value) {
 				repoHost.value = last.preset;
-				if (!repoAddress.value) repoAddress.value = last.url;
+				repoAddress.value = last.url;
+				repoBranch.value = last.ref || '';
+				showTarget(false);
 			}
 			showPlaceholder();
 			repoForm.hidden = false;
@@ -1792,7 +1831,7 @@
 			content.appendChild(head);
 			content.appendChild(el('p', { class: 'cfg-actions' }, [
 				button('Download all (ZIP)', () => downloadZip(status), 'cfg-button cfg-primary'),
-				origin ? button('Load again from the repository', () => loadRepo(origin.preset, origin.url)) : '',
+				origin ? button('Load again from the repository', () => loadRepo(origin.preset, origin.url, origin.ref)) : '',
 				button('Unload', () => {
 					if (!window.confirm('Remove the loaded instance from this browser? Changes that you have not downloaded are lost. Your files on disk are not touched.')) return;
 					WS.clear();

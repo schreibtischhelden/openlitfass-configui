@@ -10,12 +10,18 @@
 
 		parse(parts) {
 			if (parts.length < 2) return null;
-			const repo = { project: parts[0] + '/' + parts[1].replace(/\.git$/, ''), ref: '', dir: '' };
-			if (parts[2] === 'tree' && parts[3]) {
-				repo.ref = parts[3];
-				repo.dir = parts.slice(4).join('/');
+			return { project: parts[0] + '/' + parts[1].replace(/\.git$/, ''), rest: parts[2] === 'tree' ? parts.slice(3) : [] };
+		},
+
+		/* branches, then tags, whose names start with the first part */
+		async refs(repo, http) {
+			const api = 'https://api.github.com/repos/' + repo.project + '/git/matching-refs/';
+			for (const kind of ['heads', 'tags']) {
+				const refs = await http.json(api + kind + '/' + encodeURIComponent(repo.rest[0]), 'the branches of ' + repo.project);
+				const names = (Array.isArray(refs) ? refs : []).map((r) => String(r.ref).replace(/^refs\/(heads|tags)\//, ''));
+				if (names.length) return names;
 			}
-			return repo;
+			return [];
 		},
 
 		async list(repo, http) {

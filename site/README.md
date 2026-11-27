@@ -25,6 +25,9 @@ Codeberg, GitLab or a Forgejo or Gitea server. Then:
   folder layout of the instance. Files you did not change come back
   exactly as they were.
 
+Paste the repository's address as the browser shows it; an address that
+points into a branch and a folder loads that folder. The branch is filled in
+from the address, also when its name contains a slash, and can be changed.
 A repository is read straight from its server, which has to allow pages
 from other sites to read it (CORS). GitHub, Codeberg and gitlab.com do; on
 a server of your own, that is up to its operator. Changes are not written
