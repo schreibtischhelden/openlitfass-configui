@@ -315,6 +315,9 @@ main form button[type="submit"] { justify-self: start; margin-top: .8rem; }
 .cfg-workspace.cfg-drop { border-color: var(--link); border-style: solid; }
 .cfg-workspace .cfg-actions { margin: 0 0 .6rem; }
 .cfg-workspace-head { margin: .8rem 0 .4rem; }
+.cfg-workspace form.cfg-repo { margin: 0 0 .8rem; }
+.cfg-workspace form.cfg-repo .cfg-actions { margin: .4rem 0 0; }
+.cfg-workspace form.cfg-repo .cfg-actions button { margin-top: 0; }
 .cfg-workspace .cfg-list { max-height: 22rem; overflow-y: auto; }
 .cfg-problems-head { margin: .6rem 0 .2rem; font-weight: 600; }
 .cfg-ok { color: var(--muted); }

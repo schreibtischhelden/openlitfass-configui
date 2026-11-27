@@ -6,13 +6,14 @@ them into your instance directory.
 
 > **Nothing leaves your browser.** The forms are never sent anywhere; the
 > files are put together on this page. Imported files are only read
-> locally.
+> locally; loading from a git repository only downloads its files.
 
 ## Your instance
 
 Load the configuration of your instance to edit it as a whole: pick the
 instance folder (the one with `instance.json`, `sources/` and `inbox/`),
-single files or a ZIP. Then:
+single files or a ZIP, or load it from a public git repository on GitHub,
+Codeberg, GitLab or a Forgejo or Gitea server. Then:
 
 - every form page works on the loaded files, and the source and inbox
   pages can pick one of them;
@@ -26,6 +27,14 @@ single files or a ZIP. Then:
 - *Download all (ZIP)* gives you the whole configuration back, in the
   folder layout of the instance. Files you did not change come back
   exactly as they were.
+
+Paste the repository's address as the browser shows it; an address that
+points into a branch and a folder loads that folder. The branch is filled in
+from the address, also when its name contains a slash, and can be changed.
+A repository is read straight from its server, which has to allow pages
+from other sites to read it (CORS). GitHub, Codeberg and gitlab.com do; on
+a server of your own, that is up to its operator. Changes are not written
+back: download the ZIP and commit the files yourself.
 
 The files stay in this browser until you unload them; nothing is uploaded.
 Only the configuration is read: `instance.json`, `categories.json`,
