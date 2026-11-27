@@ -92,7 +92,7 @@ An event needs at least a title and a date. Details:
 [Field mapping](https://docs.openlitfass.org/?page=field-mapping).
 
 :::form
-Target field* = {(title), sourceId, description, category, organizer, url, locationName, locationAddress, placeRef, start, end, date, startTime, endTime, ticketRequired, registrationRequired, familyFriendly, cancelled}
+Target field* = {(title), sourceId, description, category, organizer, url, image, locationName, locationAddress, placeRef, start, end, date, startTime, endTime, ticketRequired, registrationRequired, familyFriendly, cancelled}
 Path = ___
 Template = ___
 Regex = ___
@@ -119,6 +119,7 @@ Filters apply after fetching and mapping. Past events are always dropped.
 Days ahead = ___:number
 Place = ___
 Allowed categories = ___
+Event images = [] keep the images the source provides
 :::
 
 ### Category map
