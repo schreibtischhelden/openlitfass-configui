@@ -1045,6 +1045,7 @@
 		{ name: 'location_address', key: 'location.address', placeholder: 'Antonplatz, 13086 Berlin' },
 		{ name: 'organizer', key: 'organizer', placeholder: 'Kiezinitiative' },
 		{ name: 'link', key: 'url', placeholder: 'https://example.org/flohmarkt' },
+		{ name: 'image', key: 'image', placeholder: 'https://example.org/img/flohmarkt.jpg', hint: 'Optional: https URL of an image at its source. It is linked, not copied; visitors load it after a click or as they have set it.' },
 		{ name: 'place', key: 'place', datalist: 'cfg-instance-places', placeholder: 'antonplatz', hint: 'Optional: id or ref of a place in places.json.' },
 		{ name: 'marked_as', type: 'flags', flags: { 'Ticket required': 'ticketRequired', 'Registration required': 'registrationRequired', 'Family-friendly': 'familyFriendly', 'Cancelled': 'cancelled' } },
 		{ name: 'weekdays', key: 'repeat.weekdays', type: 'choices', hint: 'The days of the week on which the event takes place; needs From.' },
@@ -1057,7 +1058,7 @@
 		{ name: 'amount_in_euros', type: 'meta', attrs: { step: '0.01', min: '0' } },
 	];
 	const DAY = /^(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}|\*-\d{2}|easter([+-]\d+)?|[a-zäöüß][\wäöüß-]*)$/i;
-	const INBOX_ORDER = ['title', 'date', 'startTime', 'endTime', 'category', 'description', 'location', 'organizer', 'url', 'price', 'ticketRequired', 'registrationRequired', 'familyFriendly', 'cancelled', 'place', 'repeat'];
+	const INBOX_ORDER = ['title', 'date', 'startTime', 'endTime', 'category', 'description', 'location', 'organizer', 'url', 'image', 'price', 'ticketRequired', 'registrationRequired', 'familyFriendly', 'cancelled', 'place', 'repeat'];
 
 	function fileStem(name) {
 		return String(name || '').replace(/\.json$/i, '');
@@ -1160,6 +1161,7 @@
 		{ name: 'days_ahead', key: 'daysAhead', type: 'int', attrs: { min: '1' }, placeholder: '60', hint: 'Keep only events up to N days ahead. wcs: request window (default 30); ical: recurrences are expanded this far (default 180).' },
 		{ name: 'place', key: 'place', datalist: 'cfg-instance-places', placeholder: 'brotfabrik', hint: 'Link every event to this place of places.json (id or ref); for sources with a single venue.' },
 		{ name: 'allowed_categories', key: 'categories', type: 'list', datalist: 'cfg-instance-categories', placeholder: 'Kultur, Markt', hint: 'Comma-separated allowlist, applied after the category map. Empty: keep all.' },
+		{ name: 'event_images', key: 'images', type: 'bool', hint: 'Keep the event images the source provides (iCal IMAGE/ATTACH, mapping “image”). Off by default because licences vary; only https URLs are kept, and the image is linked, never copied.' },
 	];
 	const SOURCE_BY_TYPE = {
 		ical: [
@@ -1190,11 +1192,11 @@
 		{ name: 'regex', key: 'regex', placeholder: '(\\d{1,2}:\\d{2})', hint: 'Go syntax. The group “value”, otherwise all groups joined, otherwise the whole match.' },
 	];
 	const EXTRACT_ORDER = ['selector', 'attr', 'html', 'all', 'skip', 'regex'];
-	const TARGETS = ['sourceId', 'title', 'description', 'category', 'organizer', 'url', 'locationName', 'locationAddress', 'placeRef', 'start', 'end', 'date', 'startTime', 'endTime', 'price', 'ticketRequired', 'registrationRequired', 'familyFriendly', 'cancelled'];
+	const TARGETS = ['sourceId', 'title', 'description', 'category', 'organizer', 'url', 'image', 'locationName', 'locationAddress', 'placeRef', 'start', 'end', 'date', 'startTime', 'endTime', 'price', 'ticketRequired', 'registrationRequired', 'familyFriendly', 'cancelled'];
 	const BOOL_TARGETS = ['ticketRequired', 'registrationRequired', 'familyFriendly', 'cancelled'];
 	const RULE = [
 		{ name: 'target_field', key: 'target' },
-		{ name: 'path', key: 'path', placeholder: 'location.title', hint: 'JSON: dot path into one item (tags.0 = first tag). RSS: tag name in lower case (content:encoded → encoded). HTML: a value name from above, or section.' },
+		{ name: 'path', key: 'path', placeholder: 'location.title', hint: 'JSON: dot path into one item (tags.0 = first tag). RSS: tag name in lower case (content:encoded → encoded), attributes as tag@attribute (enclosure@url). HTML: a value name from above, or section.' },
 		{ name: 'template', key: 'template', placeholder: '{street}, {zip} {city}', hint: 'Instead of a path: combine several values; {a|b} takes the first non-empty one.' },
 		{ name: 'regex', key: 'regex', hint: 'Extract part of the value (Go syntax).' },
 		{ name: 'format', key: 'format', placeholder: '2 Jan 2006 15:04|2 Jan 2006', hint: 'start and end only: Go time layout or RFC3339, RFC1123Z, RFC1123; several separated by |.' },
@@ -1217,7 +1219,7 @@
 		{ name: 'field', key: 'field' },
 		{ name: 'pattern', key: 'regex', placeholder: '(?i)weißensee|1308[68]', hint: 'Go syntax; (?i) makes it case-insensitive.' },
 	];
-	const SOURCE_ORDER = ['name', 'label', 'homepage', 'priority', 'preset', 'params', 'type', 'url', 'disabled', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'daysAhead', 'categories', 'include', 'exclude', 'wcsTypeIds', 'organizer', 'locationDefault', 'categoryMap', 'familyFriendly', 'place'];
+	const SOURCE_ORDER = ['name', 'label', 'homepage', 'priority', 'preset', 'params', 'type', 'url', 'disabled', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'daysAhead', 'categories', 'include', 'exclude', 'wcsTypeIds', 'organizer', 'locationDefault', 'categoryMap', 'familyFriendly', 'place', 'images'];
 
 	// the example instance's templates (sources/*.example.json)
 	const SOURCE_TEMPLATES = {

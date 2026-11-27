@@ -18,6 +18,7 @@ Category = ___
 Description = [___]:4
 Organizer = ___
 Link = ___:url
+Image = ___:url
 :::
 
 ## Location
