@@ -7,5 +7,6 @@
 - [instance.json](?page=instance)
 - [categories.json](?page=categories)
 - [places.json](?page=places)
+- [holidays.json](?page=holidays)
 - [Inbox event](?page=inbox)
 - [Source](?page=source)
