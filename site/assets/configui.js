@@ -1143,6 +1143,7 @@
 	// sections of the page (heading ids) and the types they apply to
 	const SOURCE_SECTIONS = {
 		'options-for-icalendar-and-wcs': ['ical', 'wcs'],
+		'options-for-icalendar': ['ical'],
 		'options-for-wcs': ['wcs'],
 		'options-for-json': ['json'],
 		'options-for-html': ['html'],
@@ -1169,6 +1170,9 @@
 			{ name: 'default_location', key: 'locationDefault', placeholder: 'Beispiel-Bühne, Musterstraße 5, 12345 Berlin', hint: 'Venue for events without one: “Venue, Street 1, 12345 City”.' },
 			{ name: 'family-friendly', key: 'familyFriendly', type: 'bool', hint: 'Mark every event of this source as family-friendly.' },
 		],
+		icalOnly: [
+			{ name: 'utc_times_as', key: 'icalUTCAs', attrs: { pattern: 'local|[+\\-]\\d{2}:?\\d{2}' }, placeholder: '+01:00', hint: 'Only for exporters that mark local times as UTC (…Z) after subtracting a fixed offset, so summer events show an hour late: “+01:00”, or “local” to ignore the Z. Leave empty for correct feeds.' },
+		],
 		wcs: [
 			{ name: 'wcs_type_ids', key: 'wcsTypeIds', type: 'intlist', placeholder: '27, 28, 29, 30', hint: 'Comma-separated. The content[wcs_type][] values of the admin-ajax.php request in the browser’s Network tab. Without them the plugin’s demo classes come along.' },
 		],
@@ -1183,6 +1187,8 @@
 		],
 	};
 	SOURCE_BY_TYPE.wcs = SOURCE_BY_TYPE.ical.concat(SOURCE_BY_TYPE.wcs);
+	SOURCE_BY_TYPE.ical = SOURCE_BY_TYPE.ical.concat(SOURCE_BY_TYPE.icalOnly);
+	delete SOURCE_BY_TYPE.icalOnly;
 	const EXTRACT = [
 		{ name: 'value_name', key: 'name', placeholder: 'title', hint: 'The name used as path in the field mapping.' },
 		{ name: 'selector', key: 'selector', placeholder: 'h2 a', hint: 'Relative to the event container; empty = the container itself. Supported: tag, .class, #id, [attr], [attr=value], :first-of-type, :nth-of-type(n), “a b”, “a > b”.' },
@@ -1219,7 +1225,7 @@
 		{ name: 'field', key: 'field' },
 		{ name: 'pattern', key: 'regex', placeholder: '(?i)weißensee|1308[68]', hint: 'Go syntax; (?i) makes it case-insensitive.' },
 	];
-	const SOURCE_ORDER = ['name', 'label', 'homepage', 'priority', 'preset', 'params', 'type', 'url', 'disabled', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'daysAhead', 'categories', 'include', 'exclude', 'wcsTypeIds', 'organizer', 'locationDefault', 'categoryMap', 'familyFriendly', 'place', 'images'];
+	const SOURCE_ORDER = ['name', 'label', 'homepage', 'priority', 'preset', 'params', 'type', 'url', 'disabled', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'daysAhead', 'categories', 'include', 'exclude', 'wcsTypeIds', 'organizer', 'locationDefault', 'icalUTCAs', 'categoryMap', 'familyFriendly', 'place', 'images'];
 
 	// the example instance's templates (sources/*.example.json)
 	const SOURCE_TEMPLATES = {
@@ -1250,7 +1256,7 @@
 
 	// keys a preset-based file keeps as they are: the preset provides them,
 	// the file may override them, the preset form doesn't edit them
-	const PRESET_KEEP = ['type', 'url', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'wcsTypeIds', 'organizer', 'locationDefault', 'familyFriendly'];
+	const PRESET_KEEP = ['type', 'url', 'itemsPath', 'nextPath', 'maxPages', 'itemSelector', 'sectionSelector', 'extract', 'mapping', 'wcsTypeIds', 'organizer', 'locationDefault', 'icalUTCAs', 'familyFriendly'];
 
 	/* the presets shipped with the core, copied into assets/presets/ when the
 	   site is assembled (scripts/assemble.sh) */
@@ -1304,7 +1310,7 @@
 		drop: ['status'],
 		init: (ctx) => {
 			const all = [];
-			[SOURCE_COMMON, SOURCE_BY_TYPE.wcs, SOURCE_BY_TYPE.json, SOURCE_BY_TYPE.html, SOURCE_FILTERS].forEach((list) => list.forEach((d) => { if (all.indexOf(d) < 0) all.push(d); }));
+			[SOURCE_COMMON, SOURCE_BY_TYPE.ical, SOURCE_BY_TYPE.wcs, SOURCE_BY_TYPE.json, SOURCE_BY_TYPE.html, SOURCE_FILTERS].forEach((list) => list.forEach((d) => { if (all.indexOf(d) < 0) all.push(d); }));
 			ctx.allFields = all;
 			instanceDatalists();
 			decorate(ctx.main, all.concat([{ name: 'file_name', hint: 'Without .json. The file name is the source name unless “Source name” is set; keep it stable.' }]));

@@ -49,6 +49,12 @@ Default location = ___
 Family-friendly = [] every event
 :::
 
+## Options for iCalendar
+
+:::form
+UTC times as = ___
+:::
+
 ## Options for WCS
 
 :::form
