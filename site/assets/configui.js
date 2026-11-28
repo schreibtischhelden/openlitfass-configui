@@ -1825,20 +1825,46 @@
 	function savePage(path, markdown) {
 		WS.saveText(path, markdown);
 		return instancePage(markdown).then((html) => {
-			if (WS.text(path) === markdown) WS.saveText(WS.htmlPath(path), html);
+			if (WS.text(path) !== markdown) return;
+			forgetPageCheck(path);
+			WS.saveText(WS.htmlPath(path), html);
 		});
 	}
 
-	/* pages whose site/<name>.html is missing or not what the Markdown gives
-	   (edited by hand, or the name or links in instance.json changed); a
-	   plain comparison until markdown-pages-editor#5 */
-	function stalePages() {
+	/* Pages whose site/<name>.html is missing or not what their Markdown
+	   gives (edited by hand, or made from another text or version). Checked
+	   once when an instance is loaded: afterwards the config UI writes the
+	   HTML itself, and a difference would only reflect the user's own
+	   changes. A plain comparison until markdown-pages-editor#5. */
+	const PAGES_CHECK_KEY = 'ol-config-pages-check';
+
+	function checkPagesAtLoad() {
 		const same = (a, b) => String(a).replace(/\r\n?/g, '\n') === String(b).replace(/\r\n?/g, '\n');
+		const loaded = WS.loadedAt();
 		return Promise.all(WS.pages().map((path) => {
 			const html = WS.text(WS.htmlPath(path));
 			if (html === null) return { path: path, missing: true };
 			return instancePage(WS.text(path) || '').then((expected) => (same(html, expected) ? null : { path: path, missing: false }));
-		})).then((list) => list.filter(Boolean));
+		})).then((list) => {
+			try { localStorage.setItem(PAGES_CHECK_KEY, JSON.stringify({ loaded: loaded, pages: list.filter(Boolean) })); } catch (e) {}
+		});
+	}
+
+	/* the result of that check for the instance loaded now */
+	function pagesCheck() {
+		let check = null;
+		try { check = JSON.parse(localStorage.getItem(PAGES_CHECK_KEY) || 'null'); } catch (e) {}
+		if (!check || !WS.active() || check.loaded !== WS.loadedAt() || !Array.isArray(check.pages)) return [];
+		return check.pages.filter((p) => p && WS.has(p.path));
+	}
+
+	function forgetPageCheck(path) {
+		const rest = pagesCheck().filter((p) => p.path !== path);
+		try { localStorage.setItem(PAGES_CHECK_KEY, JSON.stringify({ loaded: WS.loadedAt(), pages: rest })); } catch (e) {}
+	}
+
+	function pageCheckText(p) {
+		return p.missing ? 'is missing; it is written when the page is saved.' : 'does not match ' + p.path + ' (edited by hand, or made from another text or version).';
 	}
 
 	function setUpPages(box) {
@@ -1847,7 +1873,6 @@
 		let bound = null;
 		let loading = false;
 		let saveTimer = null;
-		let staleRun = 0;
 
 		const bar = el('div', { class: 'cfg-import' });
 		const nameInput = el('input', { id: 'cfg-page-name', type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: 'impressum' });
@@ -1994,19 +2019,16 @@
 				renderBar();
 			});
 			bar.appendChild(el('label', { class: 'cfg-bar-label' }, ['Instance “' + WS.instanceName() + '”, page in ' + WS.PAGES_DIR + ': ', select]));
-			const stale = el('span', { class: 'cfg-bar-note' });
-			bar.appendChild(stale);
-			const run = ++staleRun;
-			stalePages().then((list) => {
-				if (run !== staleRun || !list.length) return;
-				stale.append(' ' + list.map((p) => WS.htmlPath(p.path) + (p.missing ? ' is missing' : ' differs from ' + p.path)).join('; ')
-					+ ' (edited by hand, or the name or links in instance.json changed). ', button('Update the HTML pages', () => {
-					if (!window.confirm('Write ' + list.map((p) => WS.htmlPath(p.path)).join(', ') + ' anew from the Markdown? Changes made to ' + (list.length === 1 ? 'it' : 'them') + ' by hand are lost.')) return;
-					report(Promise.all(list.map((p) => savePage(p.path, WS.text(p.path) || ''))).then(() => {
-						status.textContent = 'Updated ' + list.map((p) => WS.htmlPath(p.path)).join(', ') + '.';
-					}));
-				}, 'cfg-link'), ' ');
-			}).catch((error) => { if (run === staleRun) stale.textContent = ' ' + error.message; });
+			const list = pagesCheck();
+			if (list.length) {
+				bar.appendChild(el('span', { class: 'cfg-bar-note' }, [' When the instance was loaded: ' + list.map((p) => WS.htmlPath(p.path) + ' ' + pageCheckText(p)).join(' ') + ' ',
+					button('Write the HTML anew', () => {
+						if (!window.confirm('Write ' + list.map((p) => WS.htmlPath(p.path)).join(', ') + ' anew from the Markdown? Changes made to ' + (list.length === 1 ? 'it' : 'them') + ' by hand are lost.')) return;
+						report(Promise.all(list.map((p) => savePage(p.path, WS.text(p.path) || ''))).then(() => {
+							status.textContent = 'Wrote ' + list.map((p) => WS.htmlPath(p.path)).join(', ') + ' anew.';
+						}));
+					}, 'cfg-link'), ' ']));
+			}
 			if (bound) {
 				bar.appendChild(el('span', { class: 'cfg-bar-note', text: ' Changes are saved to the loaded instance. ' }));
 				bar.appendChild(button('Remove from the instance', () => {
@@ -2388,6 +2410,7 @@
 			try {
 				const report = await WS.importEntries(entries, replace, origin);
 				if (replace) forgetBindings();
+				if (report.added.length || report.replaced.length) await checkPagesAtLoad().catch(() => {});
 				const parts = [];
 				if (report.added.length) parts.push(report.added.length + (report.added.length === 1 ? ' file' : ' files') + ' loaded' + (origin ? ' from ' + origin.label : ''));
 				if (report.replaced.length) parts.push(report.replaced.length + ' replaced');
@@ -2534,7 +2557,7 @@
 				}),
 			]));
 
-			const problems = WS.check();
+			const problems = WS.check().concat(pagesCheck().map((p) => ({ path: WS.htmlPath(p.path), text: pageCheckText(p) })));
 			if (problems.length) {
 				content.appendChild(el('p', { class: 'cfg-problems-head', text: problems.length + (problems.length === 1 ? ' thing needs' : ' things need') + ' your attention:' }));
 				content.appendChild(el('ul', { class: 'cfg-warnings' }, problems.map((pr) => {
