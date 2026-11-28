@@ -1,5 +1,6 @@
 /* openLitfass config: the loaded instance ("workspace"). The configuration
-   files of one instance (JSON) and its Markdown pages (site/pages/*.md) are
+   files of one instance (JSON), its Markdown pages (site/pages/*.md), the
+   HTML pages made from them (site/<name>.html) and site/custom-script.js are
    read from a folder, single files, a ZIP or a git repository
    (assets/repo.js) and kept in localStorage as text, so that every page of
    the config UI can edit them and the whole set can be downloaded again as
@@ -15,12 +16,30 @@
 	// one path segment as markdown-pages.js accepts it in ?page=<name>
 	const PAGE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/;
 	const PAGE_PATH = /^site\/pages\/([^/]+)\.md$/i;
+	const HTML_PATH = /^site\/([^/]+)\.html$/i;
+	const CUSTOM_SCRIPT = 'site/custom-script.js';
 	const listeners = [];
 
 	/* a Markdown page of the instance: site/pages/<name>.md */
 	function isPage(path) {
 		const match = PAGE_PATH.exec(path);
 		return !!match && PAGE_NAME.test(match[1]);
+	}
+
+	/* an HTML page in site/, as configui writes it next to site/pages/<name>.md */
+	function isHtmlPage(path) {
+		const match = HTML_PATH.exec(path);
+		return !!match && PAGE_NAME.test(match[1]);
+	}
+
+	/* files that are kept as text, not parsed as JSON */
+	function isText(path) {
+		return isPage(path) || isHtmlPage(path) || path === CUSTOM_SCRIPT;
+	}
+
+	/* site/pages/<name>.md -> site/<name>.html */
+	function htmlPath(page) {
+		return 'site/' + page.slice(PAGES_DIR.length).replace(/\.md$/i, '') + '.html';
 	}
 
 	let state = read();
@@ -47,7 +66,7 @@
 		const rank = (p) => {
 			const root = ROOT_FILES.indexOf(p);
 			if (root >= 0) return '0' + root;
-			return (p.indexOf('sources/') === 0 ? '1' : p.indexOf('inbox/') === 0 ? '2' : isPage(p) ? '3' : '4') + p;
+			return (p.indexOf('sources/') === 0 ? '1' : p.indexOf('inbox/') === 0 ? '2' : isText(p) ? '3' : '4') + p;
 		};
 		return Object.keys(state ? state.files : {}).sort((a, b) => (rank(a) < rank(b) ? -1 : rank(a) > rank(b) ? 1 : 0));
 	}
@@ -80,6 +99,8 @@
 		if (ROOT_FILES.indexOf(rel) >= 0) return rel;
 		if (/^(sources|inbox)\/[^/]+\.json$/i.test(rel)) return rel.replace(/^(sources|inbox)/i, (m) => m.toLowerCase());
 		if (isPage(rel)) return PAGES_DIR + rel.slice(PAGES_DIR.length).replace(/\.md$/i, '') + '.md';
+		if (isHtmlPage(rel)) return 'site/' + rel.slice(5).replace(/\.html$/i, '') + '.html';
+		if (rel.toLowerCase() === CUSTOM_SCRIPT) return CUSTOM_SCRIPT;
 		if (rel.indexOf('/') >= 0 || !/\.json$/i.test(rel)) return '';
 		const obj = parse(text);
 		if (!obj) return '';
@@ -145,7 +166,7 @@
 		for (const c of candidates) {
 			const rel = strip(c.path.replace(/\\/g, '/'));
 			if (/(^|\/)\./.test(rel)) continue;
-			const page = isPage(rel);
+			const page = isText(rel) || rel.toLowerCase() === CUSTOM_SCRIPT;
 			if (!page && !/\.json$/i.test(rel)) continue;
 			const possible = page || ROOT_FILES.indexOf(rel) >= 0 || /^(sources|inbox)\/[^/]+$/i.test(rel) || rel.indexOf('/') < 0;
 			if (!possible) continue;
@@ -383,7 +404,7 @@
 	function check() {
 		const problems = [];
 		if (!state) return problems;
-		sortedPaths().forEach((path) => { if (!isPage(path) && !get(path)) problems.push({ path: path, text: 'is not valid JSON.' }); });
+		sortedPaths().forEach((path) => { if (!isText(path) && !get(path)) problems.push({ path: path, text: 'is not valid JSON.' }); });
 		const cats = categoryNames();
 		if (cats) {
 			categoryRefs().forEach((r) => {
@@ -431,6 +452,9 @@
 		isPage: isPage,
 		pageName: (name) => PAGE_NAME.test(String(name)),
 		pages: () => sortedPaths().filter(isPage),
+		isHtmlPage: isHtmlPage,
+		htmlPath: htmlPath,
+		CUSTOM_SCRIPT: CUSTOM_SCRIPT,
 		move: move,
 		remove: remove,
 		clear: clear,

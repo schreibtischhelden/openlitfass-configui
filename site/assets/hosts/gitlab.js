@@ -1,6 +1,6 @@
 /* openLitfass config: GitLab plugin for assets/repo.js (gitlab.com or a
    server of its own). Lists the instance folder and the folders the
-   config UI reads (repo.folders: sources/, inbox/, site/pages/) through
+   config UI reads (repo.folders: sources/, inbox/, site/, site/pages/) through
    the repository tree API and reads the files through the API.
    Addresses: <server>/<group>[/<subgroup>…]/<project>[/-/tree/<branch>[/<folder>]] */
 (function () {

@@ -20,8 +20,8 @@
 		{ id: 'gitlab', label: 'GitLab', type: 'gitlab' },
 		{ id: 'forgejo', label: 'Forgejo / Gitea', type: 'forgejo' },
 	];
-	const WANTED = /^(?:(?:instance|categories|places|holidays)\.json|(?:sources|inbox)\/[^/]+\.json|site\/pages\/[^/]+\.md)$/i;
-	const FOLDERS = ['sources', 'inbox', 'site/pages'];
+	const WANTED = /^(?:(?:instance|categories|places|holidays)\.json|(?:sources|inbox)\/[^/]+\.json|site\/pages\/[^/]+\.md|site\/[^/]+\.html|site\/custom-script\.js)$/i;
+	const FOLDERS = ['sources', 'inbox', 'site', 'site/pages'];
 	const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 	const PARALLEL = 6;
 

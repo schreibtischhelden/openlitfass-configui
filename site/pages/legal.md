@@ -2,11 +2,11 @@
 
 Fill in who runs the instance, and this page writes its imprint
 (*Impressum*) and privacy policy (*Datenschutzerklärung*) as German
-Markdown pages: `site/pages/impressum.md` and `site/pages/datenschutz.md`.
-openLitfass shows them at `seite.html?page=impressum` and
-`seite.html?page=datenschutz` and links them in the footer once
-`imprintUrl` and `privacyUrl` in `instance.json` point there; *Add to the
-instance* sets both.
+pages: `site/impressum.html` and `site/datenschutz.html`, with their text in
+`site/pages/impressum.md` and `site/pages/datenschutz.md`. openLitfass links
+them in the footer once `imprintUrl` and `privacyUrl` in `instance.json`
+point to `impressum.html` and `datenschutz.html`; *Add to the instance* sets
+both.
 
 > **Templates, not legal advice.** They describe what openLitfass itself
 > does: no cookies, settings kept in the browser, maps and event images

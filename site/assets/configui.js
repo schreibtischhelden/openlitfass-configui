@@ -1744,12 +1744,12 @@
 		return refProblems(catRefs, placeRefs);
 	}
 
-	/* ---------- Markdown pages (site/pages/*.md) ---------- */
+	/* ---------- pages (site/pages/*.md and site/<name>.html) ---------- */
 
 	/* The editor of markdown-pages.js (assets/vendor/markdown-pages-editor/)
 	   with a preview rendered like a markdown-pages.js site. Without a loaded
 	   instance the page is a draft in localStorage that can be downloaded;
-	   with one, it edits site/pages/<name>.md there. */
+	   with one, it edits site/pages/<name>.md there and writes site/<name>.html. */
 	const PAGES_PAGE = 'pages';
 	const PAGE_TOOLBAR = ['bold', 'italic', 'heading', '|', 'link', 'list', 'numbered', 'quote', '|', 'rule'];
 
@@ -1759,12 +1759,95 @@
 		root.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]').forEach((heading) => heading.removeAttribute('id'));
 	}
 
+	/* The instance gets each page twice: site/pages/<name>.md stays the
+	   source the config UI edits, site/<name>.html is what the site serves.
+	   The HTML is rendered like the preview and wrapped in the frame of the
+	   core's static pages (web/templates/layout.html): its styles,
+	   js/settings.js and the instance script site/custom-script.js. */
+	const THEME_SCRIPT = '<script>try{var s=JSON.parse(localStorage.getItem("openlitfass:settings")||"{}"),t=s&&s.theme||localStorage.getItem("openlitfass:theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>';
+
+	function escapeHtml(text) {
+		return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	}
+
+	/* a link from instance.json, only if it is a web address or a path */
+	function pageHref(url) {
+		const value = typeof url === 'string' ? url.trim() : '';
+		return value && (/^https?:\/\//i.test(value) || !/^[a-z][a-z0-9+.-]*:/i.test(value)) ? escapeHtml(value) : '';
+	}
+
+	/* without a loaded instance: the usual file names and the instance script */
+	function instancePage(markdown) {
+		return Promise.resolve(window.MarkdownPages.ready).then(() => {
+			const editor = window.markdownPagesEditor;
+			if (!editor || typeof editor.htmlDocument !== 'function') throw new Error('The HTML pages need markdown-pages-editor with “Save HTML”.');
+			const inst = WS.active() ? WS.get('instance.json') || {} : null;
+			const name = inst && typeof inst.name === 'string' ? inst.name.trim() : '';
+			const imprint = pageHref(inst ? inst.imprintUrl : 'impressum.html');
+			const privacy = pageHref(inst ? inst.privacyUrl : 'datenschutz.html');
+			const head = [
+				'<link rel="icon" href="favicon.svg" type="image/svg+xml">',
+				THEME_SCRIPT,
+				'<script src="js/settings.js" defer></script>',
+				'<link rel="stylesheet" href="css/tokens.css">',
+				'<link rel="stylesheet" href="css/theme.css">',
+				'<link rel="stylesheet" href="css/style.css">',
+				!inst || WS.has(WS.CUSTOM_SCRIPT) ? '<script src="custom-script.js" defer></script>' : '',
+			];
+			const body = [
+				'<div class="app static-page">',
+				'  <header class="app-header">',
+				'    <div class="app-header__inner">',
+				'      <a class="logo" href="./"><span>' + escapeHtml(name || 'Zum Kalender') + '</span></a>',
+				'    </div>',
+				'  </header>',
+				'  <main class="content" id="main">',
+				window.MarkdownPages.toHtml(markdown).trim(),
+				'    <footer class="site-footer">',
+				'      <a href="./">Zum Kalender</a>',
+				'      <a href="termine/">Alle Termine</a>',
+				imprint ? '      <a href="' + imprint + '">Impressum</a>' : '',
+				privacy ? '      <a href="' + privacy + '">Datenschutz</a>' : '',
+				'      <a href="./#einstellungen">Einstellungen</a>',
+				'    </footer>',
+				'  </main>',
+				'</div>',
+			];
+			return editor.htmlDocument(body.filter(Boolean).join('\n'), {
+				title: [editor.documentTitle(markdown), name].filter(Boolean).join(' – ') || 'Seite',
+				lang: 'de',
+				head: head.filter(Boolean).join('\n'),
+			});
+		});
+	}
+
+	/* saves site/pages/<name>.md and the HTML made from it */
+	function savePage(path, markdown) {
+		WS.saveText(path, markdown);
+		return instancePage(markdown).then((html) => {
+			if (WS.text(path) === markdown) WS.saveText(WS.htmlPath(path), html);
+		});
+	}
+
+	/* pages whose site/<name>.html is missing or not what the Markdown gives
+	   (edited by hand, or the name or links in instance.json changed); a
+	   plain comparison until markdown-pages-editor#5 */
+	function stalePages() {
+		const same = (a, b) => String(a).replace(/\r\n?/g, '\n') === String(b).replace(/\r\n?/g, '\n');
+		return Promise.all(WS.pages().map((path) => {
+			const html = WS.text(WS.htmlPath(path));
+			if (html === null) return { path: path, missing: true };
+			return instancePage(WS.text(path) || '').then((expected) => (same(html, expected) ? null : { path: path, missing: false }));
+		})).then((list) => list.filter(Boolean));
+	}
+
 	function setUpPages(box) {
 		const draftKey = DRAFT_PREFIX + PAGES_PAGE;
 		const boundKey = BOUND_PREFIX + PAGES_PAGE;
 		let bound = null;
 		let loading = false;
 		let saveTimer = null;
+		let staleRun = 0;
 
 		const bar = el('div', { class: 'cfg-import' });
 		const nameInput = el('input', { id: 'cfg-page-name', type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: 'impressum' });
@@ -1827,9 +1910,9 @@
 			warnings.hidden = !problems.length;
 			fileLabel.textContent = '';
 			if (path) {
-				fileLabel.append('File: ', el('code', { text: path }), '. openLitfass shows it at ', el('code', { text: 'seite.html?page=' + name() }), ' – use that address as imprintUrl or privacyUrl, for example.');
+				fileLabel.append('Files: ', el('code', { text: path }), ' (the text) and ', el('code', { text: WS.htmlPath(path) }), ' (the page of the site). Link it as ', el('code', { text: name() + '.html' }), ', for example as imprintUrl or privacyUrl.');
 			} else {
-				fileLabel.append('The page is saved as ', el('code', { text: WS.PAGES_DIR + '<name>.md' }), '.');
+				fileLabel.append('The page is saved as ', el('code', { text: WS.PAGES_DIR + '<name>.md' }), ' and ', el('code', { text: 'site/<name>.html' }), '.');
 			}
 		}
 
@@ -1841,9 +1924,14 @@
 			if (path !== bound) {
 				if (WS.has(path)) return;
 				WS.move(bound, path);
+				if (!WS.has(WS.htmlPath(path))) WS.move(WS.htmlPath(bound), WS.htmlPath(path));
 				bind(path);
 			}
-			WS.saveText(bound, editor.getValue());
+			report(savePage(bound, editor.getValue()));
+		}
+
+		function report(promise) {
+			return promise.catch((error) => { status.textContent = error.message; });
 		}
 
 		function changed() {
@@ -1877,11 +1965,13 @@
 				nameInput.focus();
 				return;
 			}
-			if (WS.has(path) && !window.confirm(path + ' already exists in the loaded instance. Replace it?')) return;
+			const html = WS.htmlPath(path);
+			const existing = [path, html].filter((p) => WS.has(p));
+			if (existing.length && !window.confirm(existing.join(' and ') + ' already ' + (existing.length === 1 ? 'exists' : 'exist') + ' in the loaded instance. Replace ' + (existing.length === 1 ? 'it' : 'them') + '?')) return;
 			bind(path);
-			WS.saveText(path, editor.getValue());
+			report(savePage(path, editor.getValue()));
 			try { localStorage.removeItem(draftKey); } catch (e) {}
-			status.textContent = 'Added ' + path + ' to the loaded instance.';
+			status.textContent = 'Added ' + path + ' and ' + html + ' to the loaded instance.';
 			update();
 			renderBar();
 		}
@@ -1904,14 +1994,28 @@
 				renderBar();
 			});
 			bar.appendChild(el('label', { class: 'cfg-bar-label' }, ['Instance “' + WS.instanceName() + '”, page in ' + WS.PAGES_DIR + ': ', select]));
+			const stale = el('span', { class: 'cfg-bar-note' });
+			bar.appendChild(stale);
+			const run = ++staleRun;
+			stalePages().then((list) => {
+				if (run !== staleRun || !list.length) return;
+				stale.append(' ' + list.map((p) => WS.htmlPath(p.path) + (p.missing ? ' is missing' : ' differs from ' + p.path)).join('; ')
+					+ ' (edited by hand, or the name or links in instance.json changed). ', button('Update the HTML pages', () => {
+					if (!window.confirm('Write ' + list.map((p) => WS.htmlPath(p.path)).join(', ') + ' anew from the Markdown? Changes made to ' + (list.length === 1 ? 'it' : 'them') + ' by hand are lost.')) return;
+					report(Promise.all(list.map((p) => savePage(p.path, WS.text(p.path) || ''))).then(() => {
+						status.textContent = 'Updated ' + list.map((p) => WS.htmlPath(p.path)).join(', ') + '.';
+					}));
+				}, 'cfg-link'), ' ');
+			}).catch((error) => { if (run === staleRun) stale.textContent = ' ' + error.message; });
 			if (bound) {
 				bar.appendChild(el('span', { class: 'cfg-bar-note', text: ' Changes are saved to the loaded instance. ' }));
 				bar.appendChild(button('Remove from the instance', () => {
-					if (!window.confirm('Remove ' + bound + ' from the loaded instance? The text stays in the editor.')) return;
+					const files = [bound, WS.htmlPath(bound)].filter((p) => WS.has(p));
+					if (!window.confirm('Remove ' + files.join(' and ') + ' from the loaded instance? The text stays in the editor.')) return;
 					clearTimeout(saveTimer);
 					saveTimer = null;
-					WS.remove(bound);
-					status.textContent = 'Removed ' + bound + ' from the loaded instance.';
+					files.forEach((p) => WS.remove(p));
+					status.textContent = 'Removed ' + files.join(' and ') + ' from the loaded instance.';
 					bind(null);
 					writeDraft();
 					renderBar();
@@ -1937,10 +2041,17 @@
 		});
 
 		box.appendChild(el('div', { class: 'cfg-actions' }, [
-			button('Download', () => {
-				editor.download(name() || 'page');
-				status.textContent = 'Downloaded ' + (name() || 'page') + '.md.';
+			button('Download HTML', () => {
+				const file = (name() || 'page') + '.html';
+				report(instancePage(editor.getValue()).then((html) => {
+					downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), file);
+					status.textContent = 'Downloaded ' + file + '; put it into site/ of your instance.';
+				}));
 			}, 'cfg-button cfg-primary'),
+			button('Download Markdown', () => {
+				editor.download(name() || 'page');
+				status.textContent = 'Downloaded ' + (name() || 'page') + '.md; keep it in site/pages/ to edit the page again.';
+			}),
 			button('Import a file…', () => fileInput.click()),
 			button('Start over', () => {
 				const wasBound = bound;
@@ -1968,8 +2079,8 @@
 
 	/* ---------- imprint and privacy policy (#20) ---------- */
 
-	/* German templates for site/pages/impressum.md and datenschutz.md, built
-	   from a few fields. They describe what the openLitfass front end does
+	/* German templates for site/impressum.html and datenschutz.html (text in
+	   site/pages/), built from a few fields. They describe what the openLitfass front end does
 	   (web/js: no cookies, settings in localStorage, map tiles and event
 	   images only on request); everything else is up to the instance. */
 	const LEGAL_PAGE = 'legal';
@@ -1985,7 +2096,7 @@
 		{ name: 'statistics', placeholder: 'Plausible Analytics', hint: 'Only if site/custom-script.js loads a statistics tool: its name. The template then asks you to describe it.' },
 		{ name: 'supervisory_authority', placeholder: 'Berliner Beauftragte für Datenschutz und Informationsfreiheit', hint: 'Optional: the data protection authority of your federal state.' },
 	];
-	const LEGAL_URLS = { impressum: 'seite.html?page=impressum', datenschutz: 'seite.html?page=datenschutz' };
+	const LEGAL_URLS = { impressum: 'impressum.html', datenschutz: 'datenschutz.html' };
 
 	/* user input as plain Markdown text: no formatting, links, lists or HTML.
 	   Showdown takes backslash escapes for these characters; the others
@@ -2083,10 +2194,13 @@
 
 		function addToInstance() {
 			const md = pages();
-			const replace = Object.keys(md).map((stem) => WS.PAGES_DIR + stem + '.md').filter((path) => WS.has(path) && WS.text(path) !== md[path.slice(WS.PAGES_DIR.length, -3)]);
-			if (replace.length && !window.confirm('Replace ' + replace.join(' and ') + ' in the loaded instance? Changes made there on the Pages page are lost.')) return;
-			Object.keys(md).forEach((stem) => WS.saveText(WS.PAGES_DIR + stem + '.md', md[stem]));
-			const notes = ['Saved ' + Object.keys(md).map((stem) => WS.PAGES_DIR + stem + '.md').join(' and ') + '.'];
+			const stems = Object.keys(md);
+			const source = (stem) => WS.PAGES_DIR + stem + '.md';
+			const replace = stems.filter((stem) => WS.has(source(stem)) && WS.text(source(stem)) !== md[stem]).map(source)
+				.concat(stems.map((stem) => WS.htmlPath(source(stem))).filter((path) => WS.has(path)));
+			if (replace.length && !window.confirm('Replace ' + replace.join(', ') + ' in the loaded instance? Changes made to them on the Pages page or by hand are lost.')) return;
+			const notes = [];
+			// the links first: the footer of the HTML pages is made from them
 			const inst = WS.get('instance.json');
 			if (inst) {
 				const links = { imprintUrl: LEGAL_URLS.impressum, privacyUrl: LEGAL_URLS.datenschutz };
@@ -2098,7 +2212,9 @@
 			} else {
 				notes.push('The loaded instance has no instance.json; set imprintUrl and privacyUrl there.');
 			}
-			status.textContent = notes.join(' ');
+			Promise.all(stems.map((stem) => savePage(source(stem), md[stem]))).then(() => {
+				status.textContent = ['Saved ' + stems.map((stem) => WS.htmlPath(source(stem)) + ' (from ' + source(stem) + ')').join(' and ') + '.'].concat(notes).join(' ');
+			}).catch((error) => { status.textContent = error.message; });
 		}
 
 		function renderBar() {
@@ -2110,21 +2226,31 @@
 					el('a', { href: '.', text: 'load your instance on the start page' }), ' to add them to it.');
 				return;
 			}
-			const existing = Object.keys(LEGAL_URLS).map((stem) => WS.PAGES_DIR + stem + '.md').filter((path) => WS.has(path));
+			const existing = Object.keys(LEGAL_URLS).map((stem) => 'site/' + stem + '.html').filter((path) => WS.has(path));
 			bar.append('Instance “' + WS.instanceName() + '”' + (existing.length ? ' already has ' + existing.join(' and ') + '; adding replaces ' + (existing.length === 1 ? 'it' : 'them') + '. ' : '. '),
 				button('Add to the instance', addToInstance), ' ', button('Download all (ZIP)', () => downloadZip(status)), ' ', el('a', { href: '.', text: 'Overview' }));
 		}
 
-		function download(stem) {
+		function downloadHtml(stem) {
+			instancePage(pages()[stem]).then((html) => {
+				downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), stem + '.html');
+				status.textContent = 'Downloaded ' + stem + '.html; put it into site/ and set ' + (stem === 'impressum' ? 'imprintUrl' : 'privacyUrl') + ' to “' + LEGAL_URLS[stem] + '”.';
+			}).catch((error) => { status.textContent = error.message; });
+		}
+
+		function downloadMarkdown(stem) {
 			downloadBlob(new Blob([pages()[stem]], { type: 'text/markdown;charset=utf-8' }), stem + '.md');
-			status.textContent = 'Downloaded ' + stem + '.md; put it into site/pages/ and set ' + (stem === 'impressum' ? 'imprintUrl' : 'privacyUrl') + ' to “' + LEGAL_URLS[stem] + '”.';
+			status.textContent = 'Downloaded ' + stem + '.md; keep it in site/pages/ to edit the page on the Pages page.';
 		}
 
 		Object.keys(LEGAL_URLS).forEach((stem) => {
 			const preview = el('div', { class: 'cfg-legal-preview' });
 			outputs[stem] = preview;
-			box.append(el('h3', {}, [el('code', { text: WS.PAGES_DIR + stem + '.md' })]), preview,
-				el('p', { class: 'cfg-actions' }, [button('Download ' + stem + '.md', () => download(stem))]));
+			box.append(el('h3', {}, [el('code', { text: 'site/' + stem + '.html' })]), preview,
+				el('p', { class: 'cfg-actions' }, [
+					button('Download ' + stem + '.html', () => downloadHtml(stem), 'cfg-button cfg-primary'),
+					button('Download ' + stem + '.md', () => downloadMarkdown(stem)),
+				]));
 		});
 		box.insertBefore(warnings, box.firstChild);
 		box.appendChild(el('p', { class: 'cfg-actions' }, [
@@ -2180,6 +2306,10 @@
 
 	function editLink(path) {
 		if (EDIT_PAGES[path]) return '?page=' + EDIT_PAGES[path];
+		if (WS.isHtmlPage(path)) {
+			const source = WS.PAGES_DIR + path.slice('site/'.length).replace(/\.html$/i, '.md');
+			return WS.has(source) ? editLink(source) : '';
+		}
 		const folder = Object.keys(EDIT_PAGES).find((key) => key.slice(-1) === '/' && path.indexOf(key) === 0 && path.indexOf('/', key.length) < 0);
 		return folder ? '?page=' + EDIT_PAGES[folder] + '&file=' + encodeURIComponent(path) : '';
 	}
