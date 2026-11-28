@@ -313,6 +313,27 @@ main form button[type="submit"] { justify-self: start; margin-top: .8rem; }
 .cfg-warnings[hidden] { display: none; }
 
 [hidden] { display: none !important; }
+
+/* Markdown pages: the editor of markdown-pages.js in the colours of the config UI */
+
+.cfg-page-editor { margin: 1rem 0; }
+.cfg-page-editor .markdown-pages-editor {
+	--markdown-pages-editor-height: 28rem;
+	--markdown-pages-editor-background: var(--surface);
+	--markdown-pages-editor-toolbar-background: var(--surface-2);
+	--markdown-pages-editor-border: var(--border);
+	--markdown-pages-editor-radius: 8px;
+	--markdown-pages-editor-active: var(--primary);
+	--markdown-pages-editor-active-text: var(--bg);
+	color: var(--text);
+}
+.cfg-page-editor .markdown-pages-editor button { font: inherit; font-size: .9rem; color: var(--text); }
+.cfg-page-editor .markdown-pages-editor button[aria-pressed="true"] { color: var(--markdown-pages-editor-active-text); }
+.cfg-legal-preview {
+	max-height: 24rem; overflow: auto; margin: .5rem 0; padding: .4rem 1.1rem;
+	background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.cfg-page-editor .markdown-pages-editor-input { font-family: var(--mono); font-size: .88rem; color: var(--text); background: var(--bg); }
 .cfg-template { margin-top: .8rem; }
 
 /* the loaded instance (start page) */

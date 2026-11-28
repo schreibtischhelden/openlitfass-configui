@@ -1744,14 +1744,594 @@
 		return refProblems(catRefs, placeRefs);
 	}
 
+	/* ---------- pages (site/<name>.md and site/<name>.html) ---------- */
+
+	/* The editor of markdown-pages.js (assets/vendor/markdown-pages-editor/)
+	   with a preview rendered like a markdown-pages.js site. Without a loaded
+	   instance the page is a draft in localStorage that can be downloaded;
+	   with one, it edits site/<name>.md there and writes site/<name>.html. */
+	const PAGES_PAGE = 'pages';
+	const PAGE_TOOLBAR = ['bold', 'italic', 'heading', '|', 'link', 'list', 'numbered', 'quote', '|', 'rule'];
+
+	/* the sidebar lists the h2/h3 with an id in <main>; a preview's own
+	   headings are not sections of this page */
+	function withoutHeadingIds(root) {
+		root.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]').forEach((heading) => heading.removeAttribute('id'));
+	}
+
+	/* The instance gets each page twice: site/<name>.md stays the
+	   source the config UI edits, site/<name>.html is what the site serves.
+	   The HTML is rendered like the preview and wrapped in the frame of the
+	   core's static pages (web/templates/layout.html): its styles,
+	   js/settings.js and the instance script site/custom-script.js. */
+	const THEME_SCRIPT = '<script>try{var s=JSON.parse(localStorage.getItem("openlitfass:settings")||"{}"),t=s&&s.theme||localStorage.getItem("openlitfass:theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>';
+
+	function escapeHtml(text) {
+		return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	}
+
+	/* a link from instance.json, only if it is a web address or a path */
+	function pageHref(url) {
+		const value = typeof url === 'string' ? url.trim() : '';
+		return value && (/^https?:\/\//i.test(value) || !/^[a-z][a-z0-9+.-]*:/i.test(value)) ? escapeHtml(value) : '';
+	}
+
+	/* without a loaded instance: the usual file names and the instance script */
+	function instancePage(markdown) {
+		return Promise.resolve(window.MarkdownPages.ready).then(() => {
+			const editor = window.markdownPagesEditor;
+			if (!editor || typeof editor.htmlDocument !== 'function') throw new Error('The HTML pages need markdown-pages-editor with “Save HTML”.');
+			const inst = WS.active() ? WS.get('instance.json') || {} : null;
+			const name = inst && typeof inst.name === 'string' ? inst.name.trim() : '';
+			const imprint = pageHref(inst ? inst.imprintUrl : 'impressum.html');
+			const privacy = pageHref(inst ? inst.privacyUrl : 'datenschutz.html');
+			const head = [
+				'<link rel="icon" href="favicon.svg" type="image/svg+xml">',
+				THEME_SCRIPT,
+				'<script src="js/settings.js" defer></script>',
+				'<link rel="stylesheet" href="css/tokens.css">',
+				'<link rel="stylesheet" href="css/theme.css">',
+				'<link rel="stylesheet" href="css/style.css">',
+				!inst || WS.has(WS.CUSTOM_SCRIPT) ? '<script src="custom-script.js" defer></script>' : '',
+			];
+			const body = [
+				'<div class="app static-page">',
+				'  <header class="app-header">',
+				'    <div class="app-header__inner">',
+				'      <a class="logo" href="./"><span>' + escapeHtml(name || 'Zum Kalender') + '</span></a>',
+				'    </div>',
+				'  </header>',
+				'  <main class="content" id="main">',
+				window.MarkdownPages.toHtml(markdown).trim(),
+				'    <footer class="site-footer">',
+				'      <a href="./">Zum Kalender</a>',
+				'      <a href="termine/">Alle Termine</a>',
+				imprint ? '      <a href="' + imprint + '">Impressum</a>' : '',
+				privacy ? '      <a href="' + privacy + '">Datenschutz</a>' : '',
+				'      <a href="./#einstellungen">Einstellungen</a>',
+				'    </footer>',
+				'  </main>',
+				'</div>',
+			];
+			return editor.htmlDocument(body.filter(Boolean).join('\n'), {
+				title: [editor.documentTitle(markdown), name].filter(Boolean).join(' – ') || 'Seite',
+				lang: 'de',
+				head: head.filter(Boolean).join('\n'),
+			});
+		});
+	}
+
+	/* saves site/<name>.md and the HTML made from it */
+	function savePage(path, markdown) {
+		WS.saveText(path, markdown);
+		return instancePage(markdown).then((html) => {
+			if (WS.text(path) !== markdown) return;
+			forgetPageCheck(path);
+			WS.saveText(WS.htmlPath(path), html);
+		});
+	}
+
+	/* Pages whose site/<name>.html is missing or not what their Markdown
+	   gives (edited by hand, or made from another text or version). Checked
+	   once when an instance is loaded: afterwards the config UI writes the
+	   HTML itself, and a difference would only reflect the user's own
+	   changes. A plain comparison until markdown-pages-editor#5. */
+	const PAGES_CHECK_KEY = 'ol-config-pages-check';
+
+	function checkPagesAtLoad() {
+		const same = (a, b) => String(a).replace(/\r\n?/g, '\n') === String(b).replace(/\r\n?/g, '\n');
+		const loaded = WS.loadedAt();
+		return Promise.all(WS.pages().map((path) => {
+			const html = WS.text(WS.htmlPath(path));
+			if (html === null) return { path: path, missing: true };
+			return instancePage(WS.text(path) || '').then((expected) => (same(html, expected) ? null : { path: path, missing: false }));
+		})).then((list) => {
+			try { localStorage.setItem(PAGES_CHECK_KEY, JSON.stringify({ loaded: loaded, pages: list.filter(Boolean) })); } catch (e) {}
+		});
+	}
+
+	/* the result of that check for the instance loaded now */
+	function pagesCheck() {
+		let check = null;
+		try { check = JSON.parse(localStorage.getItem(PAGES_CHECK_KEY) || 'null'); } catch (e) {}
+		if (!check || !WS.active() || check.loaded !== WS.loadedAt() || !Array.isArray(check.pages)) return [];
+		return check.pages.filter((p) => p && WS.has(p.path));
+	}
+
+	function forgetPageCheck(path) {
+		const rest = pagesCheck().filter((p) => p.path !== path);
+		try { localStorage.setItem(PAGES_CHECK_KEY, JSON.stringify({ loaded: WS.loadedAt(), pages: rest })); } catch (e) {}
+	}
+
+	function pageCheckText(p) {
+		return p.missing ? 'is missing; it is written when the page is saved.' : 'does not match ' + p.path + ' (edited by hand, or made from another text or version).';
+	}
+
+	function setUpPages(box) {
+		const draftKey = DRAFT_PREFIX + PAGES_PAGE;
+		const boundKey = BOUND_PREFIX + PAGES_PAGE;
+		let bound = null;
+		let loading = false;
+		let saveTimer = null;
+
+		const bar = el('div', { class: 'cfg-import' });
+		const nameInput = el('input', { id: 'cfg-page-name', type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: 'impressum' });
+		const fileLabel = el('p', { class: 'cfg-hint' });
+		const form = el('form', { class: 'cfg-page-form', novalidate: '' }, [
+			el('label', { for: 'cfg-page-name', text: 'File name' }),
+			nameInput,
+			fileLabel,
+		]);
+		form.addEventListener('submit', (event) => event.preventDefault());
+		const warnings = el('ul', { class: 'cfg-warnings', hidden: '' });
+		const holder = el('div', { class: 'cfg-page-editor' });
+		const status = el('span', { class: 'cfg-status', role: 'status' });
+		const fileInput = el('input', { type: 'file', accept: '.md,.markdown,text/markdown,text/plain', hidden: '' });
+
+		box.classList.add('cfg-pages');
+		box.append(bar, form, warnings, holder);
+
+		const editor = window.MarkdownPages.editor(holder, {
+			toolbar: PAGE_TOOLBAR,
+			mode: 'split',
+			labels: { input: 'Markdown of the page' },
+			onChange: () => changed(),
+			afterRender: withoutHeadingIds,
+		});
+
+		const name = () => nameInput.value.trim();
+		const target = () => (WS.pageName(name()) ? WS.PAGES_DIR + name() + '.md' : null);
+
+		function readDraft() {
+			try { return JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch (e) { return null; }
+		}
+
+		function writeDraft() {
+			try { localStorage.setItem(draftKey, JSON.stringify({ name: nameInput.value, text: editor.getValue() })); } catch (e) {}
+		}
+
+		function bind(path) {
+			bound = path;
+			try { localStorage.setItem(boundKey, path || ''); } catch (e) {}
+		}
+
+		function show(fileName, text) {
+			loading = true;
+			nameInput.value = fileName;
+			editor.setValue(text);
+			editor.markSaved();
+			loading = false;
+			update();
+		}
+
+		function update() {
+			const problems = [];
+			const path = target();
+			if (!name()) problems.push('Give the page a file name, e.g. “impressum”.');
+			else if (!path) problems.push('“' + name() + '” cannot be the name of a page: use letters, digits, “-” and “_”, best in lower case; no spaces, slashes or umlauts.');
+			else if (bound && path !== bound && WS.has(path)) problems.push('“' + path + '” already exists in the loaded instance. Choose another file name; until then the changes are not saved there.');
+			warnings.textContent = '';
+			problems.forEach((p) => warnings.appendChild(el('li', { text: p })));
+			warnings.hidden = !problems.length;
+			fileLabel.textContent = '';
+			if (path) {
+				fileLabel.append('Files: ', el('code', { text: path }), ' (the text) and ', el('code', { text: WS.htmlPath(path) }), ' (the page of the site). Link it as ', el('code', { text: name() + '.html' }), ', for example as imprintUrl or privacyUrl.');
+			} else {
+				fileLabel.append('The page is saved as ', el('code', { text: WS.PAGES_DIR + '<name>.md' }), ' and ', el('code', { text: 'site/<name>.html' }), '.');
+			}
+		}
+
+		function save() {
+			clearTimeout(saveTimer);
+			saveTimer = null;
+			const path = target();
+			if (!bound || !path) return;
+			if (path !== bound) {
+				if (WS.has(path)) return;
+				WS.move(bound, path);
+				if (!WS.has(WS.htmlPath(path))) WS.move(WS.htmlPath(bound), WS.htmlPath(path));
+				bind(path);
+			}
+			report(savePage(bound, editor.getValue()));
+		}
+
+		function report(promise) {
+			return promise.catch((error) => { status.textContent = error.message; });
+		}
+
+		function changed() {
+			if (loading) return;
+			update();
+			if (!bound) {
+				writeDraft();
+				return;
+			}
+			clearTimeout(saveTimer);
+			saveTimer = setTimeout(save, 300);
+		}
+		nameInput.addEventListener('input', changed);
+		window.addEventListener('pagehide', () => { if (saveTimer) save(); });
+
+		function open(path) {
+			bind(path);
+			show(path.slice(WS.PAGES_DIR.length).replace(/\.md$/i, ''), WS.text(path) || '');
+		}
+
+		function openDraft() {
+			bind(null);
+			const draft = readDraft();
+			show(draft && typeof draft.name === 'string' ? draft.name : '', draft && typeof draft.text === 'string' ? draft.text : '');
+		}
+
+		function addToInstance() {
+			const path = target();
+			if (!path) {
+				status.textContent = 'Give the page a valid file name first.';
+				nameInput.focus();
+				return;
+			}
+			const html = WS.htmlPath(path);
+			const existing = [path, html].filter((p) => WS.has(p));
+			if (existing.length && !window.confirm(existing.join(' and ') + ' already ' + (existing.length === 1 ? 'exists' : 'exist') + ' in the loaded instance. Replace ' + (existing.length === 1 ? 'it' : 'them') + '?')) return;
+			bind(path);
+			report(savePage(path, editor.getValue()));
+			try { localStorage.removeItem(draftKey); } catch (e) {}
+			status.textContent = 'Added ' + path + ' and ' + html + ' to the loaded instance.';
+			update();
+			renderBar();
+		}
+
+		function renderBar() {
+			bar.textContent = '';
+			if (!WS.active()) {
+				bar.append(button('Import a Markdown file…', () => fileInput.click()),
+					' or write a new page. Your text is kept in this browser until you start over. To edit the pages of your instance, ',
+					el('a', { href: '.', text: 'load your instance on the start page' }), '.');
+				return;
+			}
+			const select = el('select', { 'aria-label': 'Page in the loaded instance' }, [el('option', { value: '', text: '(a new page)' })]
+				.concat(WS.pages().map((p) => el('option', { value: p, text: p.slice(WS.PAGES_DIR.length) }))));
+			select.value = bound || '';
+			select.addEventListener('change', () => {
+				if (saveTimer) save();
+				if (select.value) open(select.value);
+				else openDraft();
+				renderBar();
+			});
+			bar.appendChild(el('label', { class: 'cfg-bar-label' }, ['Instance “' + WS.instanceName() + '”, page in ' + WS.PAGES_DIR + ': ', select]));
+			const list = pagesCheck();
+			if (list.length) {
+				bar.appendChild(el('span', { class: 'cfg-bar-note' }, [' When the instance was loaded: ' + list.map((p) => WS.htmlPath(p.path) + ' ' + pageCheckText(p)).join(' ') + ' ',
+					button('Write the HTML anew', () => {
+						if (!window.confirm('Write ' + list.map((p) => WS.htmlPath(p.path)).join(', ') + ' anew from the Markdown? Changes made to ' + (list.length === 1 ? 'it' : 'them') + ' by hand are lost.')) return;
+						report(Promise.all(list.map((p) => savePage(p.path, WS.text(p.path) || ''))).then(() => {
+							status.textContent = 'Wrote ' + list.map((p) => WS.htmlPath(p.path)).join(', ') + ' anew.';
+						}));
+					}, 'cfg-link'), ' ']));
+			}
+			if (bound) {
+				bar.appendChild(el('span', { class: 'cfg-bar-note', text: ' Changes are saved to the loaded instance. ' }));
+				bar.appendChild(button('Remove from the instance', () => {
+					const files = [bound, WS.htmlPath(bound)].filter((p) => WS.has(p));
+					if (!window.confirm('Remove ' + files.join(' and ') + ' from the loaded instance? The text stays in the editor.')) return;
+					clearTimeout(saveTimer);
+					saveTimer = null;
+					files.forEach((p) => WS.remove(p));
+					status.textContent = 'Removed ' + files.join(' and ') + ' from the loaded instance.';
+					bind(null);
+					writeDraft();
+					renderBar();
+				}, 'cfg-link cfg-danger'));
+			} else {
+				bar.append(' ', button('Add to the instance', addToInstance));
+			}
+			bar.append(' ', button('Download all (ZIP)', () => { if (saveTimer) save(); downloadZip(status); }), ' ', el('a', { href: '.', text: 'Overview' }));
+		}
+
+		fileInput.addEventListener('change', () => {
+			const file = fileInput.files[0];
+			fileInput.value = '';
+			if (!file) return;
+			const reader = new FileReader();
+			reader.onload = () => {
+				const text = String(reader.result).replace(/^﻿/, '');
+				if (!bound) nameInput.value = file.name.replace(/\.(md|markdown|txt)$/i, '');
+				editor.setValue(text);
+				status.textContent = 'Loaded ' + file.name + '.' + (bound ? ' It replaces ' + bound + ' in the loaded instance.' : '');
+			};
+			reader.readAsText(file);
+		});
+
+		box.appendChild(el('div', { class: 'cfg-actions' }, [
+			button('Download HTML', () => {
+				const file = (name() || 'page') + '.html';
+				report(instancePage(editor.getValue()).then((html) => {
+					downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), file);
+					status.textContent = 'Downloaded ' + file + '; put it into site/ of your instance.';
+				}));
+			}, 'cfg-button cfg-primary'),
+			button('Download Markdown', () => {
+				editor.download(name() || 'page');
+				status.textContent = 'Downloaded ' + (name() || 'page') + '.md; keep it next to the HTML in site/ to edit the page again.';
+			}),
+			button('Import a file…', () => fileInput.click()),
+			button('Start over', () => {
+				const wasBound = bound;
+				if (!window.confirm('Clear the page?' + (wasBound ? ' ' + wasBound + ' in the loaded instance stays as it is.' : ''))) return;
+				if (saveTimer) save();
+				try { localStorage.removeItem(draftKey); } catch (e) {}
+				bind(null);
+				show('', '');
+				status.textContent = 'The page was cleared.' + (wasBound ? ' ' + wasBound + ' in the loaded instance is unchanged.' : '');
+				renderBar();
+			}),
+			status,
+			fileInput,
+		]));
+
+		const requested = new URLSearchParams(window.location.search).get('file');
+		let stored = null;
+		try { stored = localStorage.getItem(boundKey); } catch (e) {}
+		const start = WS.active() ? [requested, requested === null ? stored : null].find((p) => p && WS.isPage(p) && WS.has(p)) : null;
+		if (start) open(start);
+		else openDraft();
+		renderBar();
+		WS.onChange(renderBar);
+	}
+
+	/* ---------- imprint and privacy policy (#20) ---------- */
+
+	/* German templates for site/impressum.html and datenschutz.html (text in
+	   site/<name>.md), built from a few fields. They describe what the openLitfass front end does
+	   (web/js: no cookies, settings in localStorage, map tiles and event
+	   images only on request); everything else is up to the instance. */
+	const LEGAL_PAGE = 'legal';
+	const LEGAL_FIELDS = [
+		{ name: 'name', placeholder: 'Erika Mustermann or Kiezverein e. V.', hint: 'Person or organisation that runs the site; for an association, also name who represents it.' },
+		{ name: 'address', placeholder: 'Musterstraße 1\n13086 Berlin', hint: 'A postal address where you can be reached; no PO box.' },
+		{ name: 'e-mail', placeholder: 'kontakt@example.org' },
+		{ name: 'phone', hint: 'Optional, if the e-mail address is the only fast way to reach you.' },
+		{ name: 'responsible_person', placeholder: 'Erika Mustermann' },
+		{ name: 'responsible_address', hint: 'Leave empty if it is the address above.' },
+		{ name: 'hosting', hint: 'Who delivers the pages and so sees the visitors’ IP addresses.' },
+		{ name: 'hosting_company', placeholder: 'Beispiel Hosting GmbH, Serverweg 2, 10115 Berlin', hint: 'Name and address of the hosting company, for a server of your own; empty if you run the server yourself.' },
+		{ name: 'statistics', placeholder: 'Plausible Analytics', hint: 'Only if site/custom-script.js loads a statistics tool: its name. The template then asks you to describe it.' },
+		{ name: 'supervisory_authority', placeholder: 'Berliner Beauftragte für Datenschutz und Informationsfreiheit', hint: 'Optional: the data protection authority of your federal state.' },
+	];
+	const LEGAL_URLS = { impressum: 'impressum.html', datenschutz: 'datenschutz.html' };
+
+	/* user input as plain Markdown text: no formatting, links, lists or HTML.
+	   Showdown takes backslash escapes for these characters; the others
+	   become entities, which it passes through. */
+	function mdText(text) {
+		return String(text || '').trim()
+			.replace(/([\\`*_[\]#!])/g, '\\$1')
+			.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\|/g, '&#124;').replace(/~/g, '&#126;')
+			.replace(/^(\d+)\./, '$1\\.').replace(/^([-+])/, '\\$1');
+	}
+
+	function mdLines(text) {
+		return String(text || '').split(/\r?\n/).map((line) => mdText(line)).filter(Boolean).join(HARD_BREAK);
+	}
+
+	/* lines of one block (an address), joined with Markdown hard breaks */
+	const HARD_BREAK = '  \n';
+	function mdBlock(lines) {
+		return lines.filter(Boolean).join(HARD_BREAK);
+	}
+
+	function mdMail(address) {
+		const mail = String(address || '').trim();
+		return /^[^\s@<>()[\]]+@[^\s@<>()[\]]+\.[^\s@<>()[\]]+$/.test(mail) ? '[' + mail + '](mailto:' + mail + ')' : mdText(mail);
+	}
+
+	function imprintMarkdown(v) {
+		const out = ['# Impressum', '', '## Angaben gemäß § 5 DDG', '', mdBlock([mdText(v.name) || '[Name]', mdLines(v.address) || '[Anschrift]']), '', '## Kontakt', ''];
+		out.push(mdBlock(['E-Mail: ' + (mdMail(v.email) || '[E-Mail-Adresse]'), v.phone ? 'Telefon: ' + mdText(v.phone) : '']));
+		if (v.responsible) {
+			out.push('', '## Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV', '', mdBlock([mdText(v.responsible), mdLines(v.responsibleAddress) || mdLines(v.address)]));
+		}
+		out.push('', '## Termine', '',
+			'Die Termine stammen von den Websites der Veranstalter und werden automatisch übernommen. Für ihre Richtigkeit sind die jeweiligen Veranstalter verantwortlich.');
+		return out.join('\n') + '\n';
+	}
+
+	function privacyMarkdown(v) {
+		const out = ['# Datenschutzerklärung', '', '## Verantwortlich', '', mdBlock([mdText(v.name) || '[Name]', mdLines(v.address) || '[Anschrift]', 'E-Mail: ' + (mdMail(v.email) || '[E-Mail-Adresse]')]), ''];
+		out.push('## Aufruf der Website', '');
+		if (v.hosting === 'github') {
+			out.push('Die Website wird über GitHub Pages bereitgestellt, einen Dienst der GitHub, Inc., 88 Colin P. Kelly Jr. Street, San Francisco, CA 94107, USA. '
+				+ 'Beim Aufruf jeder Seite verarbeitet GitHub technisch notwendige Daten – deine IP-Adresse, Datum und Uhrzeit, die aufgerufene Adresse und Angaben zu deinem Browser –, um die Seite auszuliefern und vor Missbrauch zu schützen. '
+				+ 'Dabei können Daten in die USA übermittelt werden; GitHub ist als Teil von Microsoft unter dem EU-US Data Privacy Framework zertifiziert. '
+				+ 'Mehr dazu in der [Datenschutzerklärung von GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).');
+		} else {
+			out.push((v.hostingCompany ? 'Die Website liegt bei ' + mdText(v.hostingCompany.replace(/\s*\r?\n\s*/g, ', ')) + '. ' : '')
+				+ 'Beim Aufruf jeder Seite verarbeitet der Server technisch notwendige Daten – deine IP-Adresse, Datum und Uhrzeit, die aufgerufene Adresse und Angaben zu deinem Browser –, um die Seite auszuliefern und vor Missbrauch zu schützen. '
+				+ '**[Ergänze, ob diese Daten in Protokolldateien gespeichert werden und wann sie gelöscht werden.]**');
+		}
+		out.push('', 'Rechtsgrundlage ist unser berechtigtes Interesse an einer sicheren und zuverlässigen Bereitstellung der Website (Art. 6 Abs. 1 lit. f DSGVO).', '');
+		out.push('## Keine Cookies, Einstellungen im Browser', '',
+			'Die Website setzt keine Cookies. Deine Einstellungen, etwa für das Farbschema, Karten und Bilder, speichert sie nur im lokalen Speicher deines Browsers (localStorage); sie werden nicht übertragen. Du kannst sie in deinem Browser jederzeit löschen.', '');
+		out.push('## Karten', '',
+			'Kartenausschnitte werden erst geladen, wenn du „Karte anzeigen“ wählst oder es in den Einstellungen so festlegst. '
+			+ 'Dann lädt dein Browser Kartenbilder von OpenStreetMap (OpenStreetMap Foundation, St John’s Innovation Centre, Cowley Road, Cambridge, CB4 0WS, Vereinigtes Königreich), deren Server dabei deine IP-Adresse erhält. '
+			+ 'Mehr dazu in der [Datenschutzerklärung der OpenStreetMap Foundation](https://osmfoundation.org/wiki/Privacy_Policy).', '');
+		out.push('## Bilder der Veranstalter', '',
+			'Bilder zu Terminen werden nur auf deinen Wunsch oder nach deiner Einstellung geladen, und zwar direkt vom Server des jeweiligen Veranstalters. Dieser erhält dabei deine IP-Adresse, aber nicht die Adresse der Seite, auf der du das Bild ansiehst.', '');
+		if (v.statistics) {
+			out.push('## Statistik', '', 'Um zu sehen, wie die Website genutzt wird, setzt sie ' + mdText(v.statistics) + ' ein. '
+				+ '**[Ergänze, welche Daten dabei verarbeitet werden, durch wen, wo und auf welcher Rechtsgrundlage, und wie man widersprechen kann.]**', '');
+		}
+		out.push('## Links', '', 'Links zu Veranstaltern und anderen Websites führen zu Angeboten, für die deren Betreiber verantwortlich sind.', '');
+		out.push('## Deine Rechte', '',
+			'Du hast das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20) und Widerspruch (Art. 21). Schreib dazu an die oben genannte Adresse. '
+			+ 'Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren (Art. 77 DSGVO)' + (v.authority ? ', zum Beispiel bei: ' + mdText(v.authority) : '') + '.');
+		return out.join('\n') + '\n';
+	}
+
+	function setUpLegal(main, box) {
+		const draftKey = DRAFT_PREFIX + LEGAL_PAGE;
+		const bar = main.querySelector('[data-cfg-legal-bar]');
+		const warnings = el('ul', { class: 'cfg-warnings', hidden: '' });
+		const status = el('span', { class: 'cfg-status', role: 'status' });
+		const outputs = {};
+
+		decorate(main, LEGAL_FIELDS);
+		main.addEventListener('mdp:form-submit', (event) => event.preventDefault());
+
+		function values() {
+			const get = (name) => getValue(main, name) || '';
+			return {
+				name: get('name'), address: get('address'), email: get('e-mail'), phone: get('phone'),
+				responsible: get('responsible_person'), responsibleAddress: get('responsible_address'),
+				hosting: get('hosting') || 'github', hostingCompany: get('hosting_company'),
+				statistics: get('statistics'), authority: get('supervisory_authority'),
+			};
+		}
+
+		function pages() {
+			const v = values();
+			return { impressum: imprintMarkdown(v), datenschutz: privacyMarkdown(v) };
+		}
+
+		function addToInstance() {
+			const md = pages();
+			const stems = Object.keys(md);
+			const source = (stem) => WS.PAGES_DIR + stem + '.md';
+			const replace = stems.filter((stem) => WS.has(source(stem)) && WS.text(source(stem)) !== md[stem]).map(source)
+				.concat(stems.map((stem) => WS.htmlPath(source(stem))).filter((path) => WS.has(path)));
+			if (replace.length && !window.confirm('Replace ' + replace.join(', ') + ' in the loaded instance? Changes made to them on the Pages page or by hand are lost.')) return;
+			const notes = [];
+			// the links first: the footer of the HTML pages is made from them
+			const inst = WS.get('instance.json');
+			if (inst) {
+				const links = { imprintUrl: LEGAL_URLS.impressum, privacyUrl: LEGAL_URLS.datenschutz };
+				const other = Object.keys(links).filter((key) => inst[key] && inst[key] !== links[key]);
+				if (!other.length || window.confirm('instance.json links ' + other.map((key) => key + ' to “' + inst[key] + '”').join(' and ') + '. Point ' + (other.length === 1 ? 'it' : 'them') + ' to the new pages?')) {
+					WS.save('instance.json', Object.assign({}, inst, links));
+					notes.push('imprintUrl and privacyUrl in instance.json point to them.');
+				}
+			} else {
+				notes.push('The loaded instance has no instance.json; set imprintUrl and privacyUrl there.');
+			}
+			Promise.all(stems.map((stem) => savePage(source(stem), md[stem]))).then(() => {
+				status.textContent = ['Saved ' + stems.map((stem) => WS.htmlPath(source(stem)) + ' (from ' + source(stem) + ')').join(' and ') + '.'].concat(notes).join(' ');
+			}).catch((error) => { status.textContent = error.message; });
+		}
+
+		function renderBar() {
+			if (!bar) return;
+			bar.textContent = '';
+			bar.classList.add('cfg-import');
+			if (!WS.active()) {
+				bar.append('Your input is kept in this browser. Download the two pages below, or ',
+					el('a', { href: '.', text: 'load your instance on the start page' }), ' to add them to it.');
+				return;
+			}
+			const existing = Object.keys(LEGAL_URLS).map((stem) => 'site/' + stem + '.html').filter((path) => WS.has(path));
+			bar.append('Instance “' + WS.instanceName() + '”' + (existing.length ? ' already has ' + existing.join(' and ') + '; adding replaces ' + (existing.length === 1 ? 'it' : 'them') + '. ' : '. '),
+				button('Add to the instance', addToInstance), ' ', button('Download all (ZIP)', () => downloadZip(status)), ' ', el('a', { href: '.', text: 'Overview' }));
+		}
+
+		function downloadHtml(stem) {
+			instancePage(pages()[stem]).then((html) => {
+				downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), stem + '.html');
+				status.textContent = 'Downloaded ' + stem + '.html; put it into site/ and set ' + (stem === 'impressum' ? 'imprintUrl' : 'privacyUrl') + ' to “' + LEGAL_URLS[stem] + '”.';
+			}).catch((error) => { status.textContent = error.message; });
+		}
+
+		function downloadMarkdown(stem) {
+			downloadBlob(new Blob([pages()[stem]], { type: 'text/markdown;charset=utf-8' }), stem + '.md');
+			status.textContent = 'Downloaded ' + stem + '.md; keep it next to the HTML in site/ to edit the page on the Pages page.';
+		}
+
+		Object.keys(LEGAL_URLS).forEach((stem) => {
+			const preview = el('div', { class: 'cfg-legal-preview' });
+			outputs[stem] = preview;
+			box.append(el('h3', {}, [el('code', { text: 'site/' + stem + '.html' })]), preview,
+				el('p', { class: 'cfg-actions' }, [
+					button('Download ' + stem + '.html', () => downloadHtml(stem), 'cfg-button cfg-primary'),
+					button('Download ' + stem + '.md', () => downloadMarkdown(stem)),
+				]));
+		});
+		box.insertBefore(warnings, box.firstChild);
+		box.appendChild(el('p', { class: 'cfg-actions' }, [
+			button('Start over', () => {
+				if (!window.confirm('Clear all fields of this page?')) return;
+				try { localStorage.removeItem(draftKey); } catch (e) {}
+				main.querySelectorAll('form').forEach((form) => form.reset());
+				refresh();
+			}),
+			status,
+		]));
+
+		let timer = null;
+		function refresh() {
+			clearTimeout(timer);
+			timer = setTimeout(() => {
+				const v = values();
+				const problems = [];
+				if (!v.name) problems.push('Name: who runs the site is required.');
+				if (!v.address) problems.push('Address: a postal address is required.');
+				if (!v.email) problems.push('E-mail: an address for fast contact is required.');
+				else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)) problems.push('E-mail: “' + v.email + '” does not look like an e-mail address.');
+				if (v.hosting === 'github' && v.hostingCompany) problems.push('Hosting company is only used for a server of your own; it is left out for GitHub Pages.');
+				warnings.textContent = '';
+				problems.forEach((p) => warnings.appendChild(el('li', { text: p })));
+				warnings.hidden = !problems.length;
+				const md = pages();
+				Promise.resolve(window.MarkdownPages.ready).then(() => {
+					Object.keys(md).forEach((stem) => {
+						outputs[stem].innerHTML = window.MarkdownPages.toHtml(md[stem]);
+						withoutHeadingIds(outputs[stem]);
+					});
+				});
+				const draft = {};
+				LEGAL_FIELDS.forEach((d) => { draft[d.name] = getValue(main, d.name); });
+				try { localStorage.setItem(draftKey, JSON.stringify(draft)); } catch (e) {}
+			}, 150);
+		}
+		main.addEventListener('input', refresh);
+		main.addEventListener('change', refresh);
+
+		let draft = null;
+		try { draft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch (e) {}
+		if (draft) Object.keys(draft).forEach((name) => setValue(main, name, draft[name]));
+		refresh();
+		renderBar();
+		WS.onChange(renderBar);
+	}
+
 	/* ---------- start page: load, check and download the instance ---------- */
 
 	const EDIT_PAGES = { 'instance.json': 'instance', 'categories.json': 'categories', 'places.json': 'places', 'holidays.json': 'holidays', 'sources/': 'source', 'inbox/': 'inbox' };
 
 	function editLink(path) {
 		if (EDIT_PAGES[path]) return '?page=' + EDIT_PAGES[path];
-		const folder = path.slice(0, path.indexOf('/') + 1);
-		return EDIT_PAGES[folder] ? '?page=' + EDIT_PAGES[folder] + '&file=' + encodeURIComponent(path) : '';
+		const page = WS.isHtmlPage(path) ? path.replace(/\.html$/i, '.md') : path;
+		if (WS.isPage(page)) return WS.has(page) ? '?page=' + PAGES_PAGE + '&file=' + encodeURIComponent(page) : '';
+		const folder = Object.keys(EDIT_PAGES).find((key) => key.slice(-1) === '/' && path.indexOf(key) === 0 && path.indexOf('/', key.length) < 0);
+		return folder ? '?page=' + EDIT_PAGES[folder] + '&file=' + encodeURIComponent(path) : '';
 	}
 
 	/* files and folders dropped onto the page: [{ path, file }] */
@@ -1793,7 +2373,7 @@
 		const content = el('div');
 
 		function forgetBindings() {
-			Object.keys(SPECS).forEach((name) => { try { localStorage.removeItem(BOUND_PREFIX + name); } catch (e) {} });
+			Object.keys(SPECS).concat([PAGES_PAGE]).forEach((name) => { try { localStorage.removeItem(BOUND_PREFIX + name); } catch (e) {} });
 		}
 
 		function confirmReplace() {
@@ -1828,6 +2408,7 @@
 			try {
 				const report = await WS.importEntries(entries, replace, origin);
 				if (replace) forgetBindings();
+				if (report.added.length || report.replaced.length) await checkPagesAtLoad().catch(() => {});
 				const parts = [];
 				if (report.added.length) parts.push(report.added.length + (report.added.length === 1 ? ' file' : ' files') + ' loaded' + (origin ? ' from ' + origin.label : ''));
 				if (report.replaced.length) parts.push(report.replaced.length + ' replaced');
@@ -1974,7 +2555,7 @@
 				}),
 			]));
 
-			const problems = WS.check();
+			const problems = WS.check().concat(pagesCheck().map((p) => ({ path: WS.htmlPath(p.path), text: pageCheckText(p) })));
 			if (problems.length) {
 				content.appendChild(el('p', { class: 'cfg-problems-head', text: problems.length + (problems.length === 1 ? ' thing needs' : ' things need') + ' your attention:' }));
 				content.appendChild(el('ul', { class: 'cfg-warnings' }, problems.map((pr) => {
@@ -2015,5 +2596,9 @@
 		if (spec && spec.init) setUp(main, spec);
 		const box = main.querySelector('[data-cfg-workspace]');
 		if (box) setUpWorkspace(box);
+		const pages = main.querySelector('[data-cfg-pages]');
+		if (pages) setUpPages(pages);
+		const legal = main.querySelector('[data-cfg-legal]');
+		if (legal) setUpLegal(main, legal);
 	});
 })();

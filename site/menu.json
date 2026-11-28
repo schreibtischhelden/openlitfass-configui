@@ -6,6 +6,8 @@
 		{ "title": "places.json", "page": "places" },
 		{ "title": "holidays.json", "page": "holidays" },
 		{ "title": "Inbox event", "page": "inbox" },
-		{ "title": "Source", "page": "source" }
+		{ "title": "Source", "page": "source" },
+		{ "title": "Pages", "page": "pages" },
+		{ "title": "Imprint and privacy", "page": "legal" }
 	]
 }

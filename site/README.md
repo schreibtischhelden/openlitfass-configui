@@ -37,8 +37,10 @@ a server of your own, that is up to its operator. Changes are not written
 back: download the ZIP and commit the files yourself.
 
 The files stay in this browser until you unload them; nothing is uploaded.
-Only the configuration is read: `instance.json`, `categories.json`,
-`places.json`, `holidays.json`, `sources/*.json` and `inbox/*.json`.
+Only the configuration and the pages are read: `instance.json`,
+`categories.json`, `places.json`, `holidays.json`, `sources/*.json`,
+`inbox/*.json`, the pages `site/*.md` and `site/*.html`, and
+`site/custom-script.js` (only to know whether the pages load it).
 
 <div data-cfg-workspace></div>
 
@@ -51,6 +53,8 @@ Only the configuration is read: `instance.json`, `categories.json`,
 <a href="?page=holidays"><strong>holidays.json</strong>Named day lists, such as holidays, for recurring inbox events.</a>
 <a href="?page=inbox"><strong>Inbox event</strong>A single or recurring event added by hand.</a>
 <a href="?page=source"><strong>Source</strong>An iCalendar, RSS, JSON, HTML or WordPress source with its field mapping and filters, or a preset of the core.</a>
+<a href="?page=pages"><strong>Pages</strong>Pages in Markdown, such as the imprint and the privacy policy, with a preview.</a>
+<a href="?page=legal"><strong>Imprint and privacy</strong>German templates for the imprint and the privacy policy, built from a few fields.</a>
 </div>
 
 ## How it works
@@ -69,6 +73,7 @@ Only the configuration is read: `instance.json`, `categories.json`,
 | `holidays.json` | the instance directory |
 | an inbox event | `inbox/<name>.json` |
 | a source | `sources/<name>.json` |
+| a page | `site/<name>.html`, its text next to it in `site/<name>.md` |
 
 The next `fetch` or `serve` run picks the files up. Changes to
 `instance.json` need a restart of `serve`.

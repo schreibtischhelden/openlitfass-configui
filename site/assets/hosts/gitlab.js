@@ -1,6 +1,7 @@
 /* openLitfass config: GitLab plugin for assets/repo.js (gitlab.com or a
-   server of its own). Lists the instance folder, sources/ and inbox/
-   through the repository tree API and reads the files through the API.
+   server of its own). Lists the instance folder and the folders the
+   config UI reads (repo.folders: sources/, inbox/, site/) through
+   the repository tree API and reads the files through the API.
    Addresses: <server>/<group>[/<subgroup>…]/<project>[/-/tree/<branch>[/<folder>]] */
 (function () {
 	'use strict';
@@ -48,11 +49,18 @@
 				read: () => http.text(api + '/files/' + encodeURIComponent(base + rel) + '/raw' + (repo.ref ? '?ref=' + encodeURIComponent(repo.ref) : ''), rel),
 			});
 
-			const root = await folder('');
-			const out = root.filter((item) => item.type === 'blob').map((item) => file(item.name));
-			const subfolders = root.filter((item) => item.type === 'tree' && /^(sources|inbox)$/i.test(item.name));
-			for (const sub of subfolders) {
-				(await folder(sub.name)).filter((item) => item.type === 'blob').forEach((item) => out.push(file(sub.name + '/' + item.name)));
+			const listed = { '': await folder('') };
+			const out = listed[''].filter((item) => item.type === 'blob').map((item) => file(item.name));
+			// each wanted folder only if its parent has it, one request per level
+			for (const wanted of repo.folders || ['sources', 'inbox']) {
+				let dir = '';
+				for (const name of wanted.split('/')) {
+					if (dir === null) break;
+					const hit = listed[dir].find((item) => item.type === 'tree' && item.name.toLowerCase() === name);
+					dir = hit ? (dir ? dir + '/' : '') + hit.name : null;
+					if (dir !== null && !listed[dir]) listed[dir] = await folder(dir);
+				}
+				if (dir) listed[dir].filter((item) => item.type === 'blob').forEach((item) => out.push(file(dir + '/' + item.name)));
 			}
 			return out;
 		},

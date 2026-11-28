@@ -1,8 +1,10 @@
 /* openLitfass config: the loaded instance ("workspace"). The configuration
-   files of one instance are read from a folder, single files, a ZIP or a
-   git repository (assets/repo.js) and kept in localStorage as text, so that
-   every form page can edit them and the whole set can be downloaded again
-   as a ZIP. Files that are not changed are written back byte for byte.
+   files of one instance (JSON), its pages (site/<name>.md and the
+   HTML made from it, site/<name>.html) and site/custom-script.js are
+   read from a folder, single files, a ZIP or a git repository
+   (assets/repo.js) and kept in localStorage as text, so that every page of
+   the config UI can edit them and the whole set can be downloaded again as
+   a ZIP. Files that are not changed are written back byte for byte.
    Nothing is sent anywhere. */
 (function () {
 	'use strict';
@@ -10,7 +12,35 @@
 	const KEY = 'ol-config-workspace';
 	const ROOT_FILES = ['instance.json', 'categories.json', 'places.json', 'holidays.json'];
 	const FOLDERS = ['sources/', 'inbox/'];
+	const PAGES_DIR = 'site/';
+	// one path segment as markdown-pages.js accepts it in ?page=<name>
+	const PAGE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/;
+	const PAGE_PATH = /^site\/([^/]+)\.md$/i;
+	const HTML_PATH = /^site\/([^/]+)\.html$/i;
+	const CUSTOM_SCRIPT = 'site/custom-script.js';
 	const listeners = [];
+
+	/* the text of a page of the instance: site/<name>.md */
+	function isPage(path) {
+		const match = PAGE_PATH.exec(path);
+		return !!match && PAGE_NAME.test(match[1]);
+	}
+
+	/* an HTML page in site/, as configui writes it next to site/<name>.md */
+	function isHtmlPage(path) {
+		const match = HTML_PATH.exec(path);
+		return !!match && PAGE_NAME.test(match[1]);
+	}
+
+	/* files that are kept as text, not parsed as JSON */
+	function isText(path) {
+		return isPage(path) || isHtmlPage(path) || path === CUSTOM_SCRIPT;
+	}
+
+	/* site/<name>.md -> site/<name>.html */
+	function htmlPath(page) {
+		return 'site/' + page.slice(PAGES_DIR.length).replace(/\.md$/i, '') + '.html';
+	}
 
 	let state = read();
 
@@ -36,7 +66,7 @@
 		const rank = (p) => {
 			const root = ROOT_FILES.indexOf(p);
 			if (root >= 0) return '0' + root;
-			return (p.indexOf('sources/') === 0 ? '1' : p.indexOf('inbox/') === 0 ? '2' : '3') + p;
+			return (p.indexOf('sources/') === 0 ? '1' : p.indexOf('inbox/') === 0 ? '2' : isText(p) ? '3' : '4') + p;
 		};
 		return Object.keys(state ? state.files : {}).sort((a, b) => (rank(a) < rank(b) ? -1 : rank(a) > rank(b) ? 1 : 0));
 	}
@@ -68,6 +98,9 @@
 		const rel = path.replace(/\\/g, '/').replace(/^\/+/, '');
 		if (ROOT_FILES.indexOf(rel) >= 0) return rel;
 		if (/^(sources|inbox)\/[^/]+\.json$/i.test(rel)) return rel.replace(/^(sources|inbox)/i, (m) => m.toLowerCase());
+		if (isPage(rel)) return PAGES_DIR + rel.slice(PAGES_DIR.length).replace(/\.md$/i, '') + '.md';
+		if (isHtmlPage(rel)) return 'site/' + rel.slice(5).replace(/\.html$/i, '') + '.html';
+		if (rel.toLowerCase() === CUSTOM_SCRIPT) return CUSTOM_SCRIPT;
 		if (rel.indexOf('/') >= 0 || !/\.json$/i.test(rel)) return '';
 		const obj = parse(text);
 		if (!obj) return '';
@@ -81,8 +114,8 @@
 		const tops = paths.map((p) => (p.indexOf('/') > 0 ? p.split('/')[0] : ''));
 		const top = tops[0];
 		if (!top || tops.some((t) => t !== top)) return (p) => p;
-		const known = ['sources', 'inbox'];
-		if (known.indexOf(top.toLowerCase()) >= 0 && paths.every((p) => p.split('/').length === 2)) return (p) => p;
+		// paths that already have the instance layout keep it
+		if (paths.every((p) => /^(sources|inbox)\/[^/]+$/i.test(p) || /^site\/[^/]+$/i.test(p))) return (p) => p;
 		return (p) => p.slice(top.length + 1);
 	}
 
@@ -132,8 +165,10 @@
 		const report = { added: [], replaced: [], ignored: [], invalid: [] };
 		for (const c of candidates) {
 			const rel = strip(c.path.replace(/\\/g, '/'));
-			if (/(^|\/)\./.test(rel) || !/\.json$/i.test(rel)) continue;
-			const possible = ROOT_FILES.indexOf(rel) >= 0 || /^(sources|inbox)\/[^/]+$/i.test(rel) || rel.indexOf('/') < 0;
+			if (/(^|\/)\./.test(rel)) continue;
+			const page = isText(rel) || rel.toLowerCase() === CUSTOM_SCRIPT;
+			if (!page && !/\.json$/i.test(rel)) continue;
+			const possible = page || ROOT_FILES.indexOf(rel) >= 0 || /^(sources|inbox)\/[^/]+$/i.test(rel) || rel.indexOf('/') < 0;
 			if (!possible) continue;
 			const text = await c.read();
 			const target = classify(rel, text);
@@ -141,7 +176,7 @@
 				report.ignored.push(rel);
 				continue;
 			}
-			if (!parse(text)) report.invalid.push(target);
+			if (!page && !parse(text)) report.invalid.push(target);
 			(files[target] !== undefined ? report.replaced : report.added).push(target);
 			files[target] = text;
 		}
@@ -166,6 +201,19 @@
 		(keep || []).forEach((key) => { if (old && key in old && !(key in merged)) merged[key] = old[key]; });
 		if (old && canonical(old) === canonical(merged)) return false;
 		state.files[path] = format(merged);
+		persist();
+		return true;
+	}
+
+	/* the file as stored, e.g. a Markdown page; null if there is none */
+	function text(path) {
+		return state && state.files[path] !== undefined ? state.files[path] : null;
+	}
+
+	/* stores text at path unless it is already there */
+	function saveText(path, value) {
+		if (!state || state.files[path] === String(value)) return false;
+		state.files[path] = String(value);
 		persist();
 		return true;
 	}
@@ -356,7 +404,7 @@
 	function check() {
 		const problems = [];
 		if (!state) return problems;
-		sortedPaths().forEach((path) => { if (!get(path)) problems.push({ path: path, text: 'is not valid JSON.' }); });
+		sortedPaths().forEach((path) => { if (!isText(path) && !get(path)) problems.push({ path: path, text: 'is not valid JSON.' }); });
 		const cats = categoryNames();
 		if (cats) {
 			categoryRefs().forEach((r) => {
@@ -399,6 +447,14 @@
 		has: (path) => !!state && state.files[path] !== undefined,
 		get: get,
 		save: save,
+		text: text,
+		saveText: saveText,
+		isPage: isPage,
+		pageName: (name) => PAGE_NAME.test(String(name)),
+		pages: () => sortedPaths().filter(isPage),
+		isHtmlPage: isHtmlPage,
+		htmlPath: htmlPath,
+		CUSTOM_SCRIPT: CUSTOM_SCRIPT,
 		move: move,
 		remove: remove,
 		clear: clear,
@@ -422,5 +478,6 @@
 		zip: zip,
 		onChange: (fn) => listeners.push(fn),
 		FOLDERS: FOLDERS,
+		PAGES_DIR: PAGES_DIR,
 	};
 })();
