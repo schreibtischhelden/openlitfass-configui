@@ -3,7 +3,7 @@
 Fill in who runs the instance, and this page writes its imprint
 (*Impressum*) and privacy policy (*Datenschutzerklärung*) as German
 pages: `site/impressum.html` and `site/datenschutz.html`, with their text in
-`site/pages/impressum.md` and `site/pages/datenschutz.md`. openLitfass links
+`site/impressum.md` and `site/datenschutz.md`. openLitfass links
 them in the footer once `imprintUrl` and `privacyUrl` in `instance.json`
 point to `impressum.html` and `datenschutz.html`; *Add to the instance* sets
 both.

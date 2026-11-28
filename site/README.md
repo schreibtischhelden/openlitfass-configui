@@ -39,7 +39,7 @@ back: download the ZIP and commit the files yourself.
 The files stay in this browser until you unload them; nothing is uploaded.
 Only the configuration and the pages are read: `instance.json`,
 `categories.json`, `places.json`, `holidays.json`, `sources/*.json`,
-`inbox/*.json`, the pages `site/pages/*.md` and `site/*.html`, and
+`inbox/*.json`, the pages `site/*.md` and `site/*.html`, and
 `site/custom-script.js` (only to know whether the pages load it).
 
 <div data-cfg-workspace></div>
@@ -73,7 +73,7 @@ Only the configuration and the pages are read: `instance.json`,
 | `holidays.json` | the instance directory |
 | an inbox event | `inbox/<name>.json` |
 | a source | `sources/<name>.json` |
-| a page | `site/<name>.html`, its text in `site/pages/<name>.md` |
+| a page | `site/<name>.html`, its text next to it in `site/<name>.md` |
 
 The next `fetch` or `serve` run picks the files up. Changes to
 `instance.json` need a restart of `serve`.

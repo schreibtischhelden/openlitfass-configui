@@ -7,7 +7,8 @@ privacy policy. Each page goes into the instance directory twice:
   calendar's other pages: header, footer, the instance's styles,
   `js/settings.js` and, if the instance has one, `site/custom-script.js`.
   Link it as `<name>.html`.
-- `site/pages/<name>.md` is the text, so the page can be edited here again.
+- `site/<name>.md` next to it is the text, so the page can be edited here
+  again. Like everything in `site/`, it is published with the site.
 
 The preview next to the text uses the same renderer, so the page looks the
 same, apart from the instance's colours. Keep both files in the instance's

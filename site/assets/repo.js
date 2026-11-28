@@ -9,7 +9,7 @@
    rest after the branch marker (tree/, -/tree/, src/branch/), refs
    names the branches or tags the rest may start with (null: no lookup),
    list gives the files of repo.dir on repo.ref as [{ path, read }]:
-	   those directly in it and those in repo.folders (e.g. site/pages). */
+	   those directly in it and those in repo.folders (e.g. site). */
 (function () {
 	'use strict';
 
@@ -20,8 +20,8 @@
 		{ id: 'gitlab', label: 'GitLab', type: 'gitlab' },
 		{ id: 'forgejo', label: 'Forgejo / Gitea', type: 'forgejo' },
 	];
-	const WANTED = /^(?:(?:instance|categories|places|holidays)\.json|(?:sources|inbox)\/[^/]+\.json|site\/pages\/[^/]+\.md|site\/[^/]+\.html|site\/custom-script\.js)$/i;
-	const FOLDERS = ['sources', 'inbox', 'site', 'site/pages'];
+	const WANTED = /^(?:(?:instance|categories|places|holidays)\.json|(?:sources|inbox)\/[^/]+\.json|site\/[^/]+\.(?:md|html)|site\/custom-script\.js)$/i;
+	const FOLDERS = ['sources', 'inbox', 'site'];
 	const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 	const PARALLEL = 6;
 
@@ -171,7 +171,7 @@
 		repo.folders = FOLDERS;
 		const files = (await plugin.list(repo, http)).filter((f) => WANTED.test(f.path));
 		if (!files.length) {
-			throw new Error('No configuration files in ' + describe(target) + '. The repository (or the folder in the address) has to hold instance.json, sources/, inbox/ or site/pages/.');
+			throw new Error('No configuration files in ' + describe(target) + '. The repository (or the folder in the address) has to hold instance.json, sources/, inbox/ or site/.');
 		}
 		const texts = await pool(files, (f) => f.read());
 		return {

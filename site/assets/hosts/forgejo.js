@@ -1,6 +1,6 @@
 /* openLitfass config: Forgejo and Gitea plugin for assets/repo.js (also
    Codeberg). Lists the instance folder and the folders the config UI
-   reads (repo.folders: sources/, inbox/, site/, site/pages/) through the contents
+   reads (repo.folders: sources/, inbox/, site/) through the contents
    API and reads the files through the API as well: the plain /raw/
    addresses of the web interface are not readable cross-origin.
    Addresses: <server>/<owner>/<repo>[/src/branch/<branch>[/<folder>]] */

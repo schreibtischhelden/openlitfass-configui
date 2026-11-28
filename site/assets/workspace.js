@@ -1,6 +1,6 @@
 /* openLitfass config: the loaded instance ("workspace"). The configuration
-   files of one instance (JSON), its Markdown pages (site/pages/*.md), the
-   HTML pages made from them (site/<name>.html) and site/custom-script.js are
+   files of one instance (JSON), its pages (site/<name>.md and the
+   HTML made from it, site/<name>.html) and site/custom-script.js are
    read from a folder, single files, a ZIP or a git repository
    (assets/repo.js) and kept in localStorage as text, so that every page of
    the config UI can edit them and the whole set can be downloaded again as
@@ -12,21 +12,21 @@
 	const KEY = 'ol-config-workspace';
 	const ROOT_FILES = ['instance.json', 'categories.json', 'places.json', 'holidays.json'];
 	const FOLDERS = ['sources/', 'inbox/'];
-	const PAGES_DIR = 'site/pages/';
+	const PAGES_DIR = 'site/';
 	// one path segment as markdown-pages.js accepts it in ?page=<name>
 	const PAGE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/;
-	const PAGE_PATH = /^site\/pages\/([^/]+)\.md$/i;
+	const PAGE_PATH = /^site\/([^/]+)\.md$/i;
 	const HTML_PATH = /^site\/([^/]+)\.html$/i;
 	const CUSTOM_SCRIPT = 'site/custom-script.js';
 	const listeners = [];
 
-	/* a Markdown page of the instance: site/pages/<name>.md */
+	/* the text of a page of the instance: site/<name>.md */
 	function isPage(path) {
 		const match = PAGE_PATH.exec(path);
 		return !!match && PAGE_NAME.test(match[1]);
 	}
 
-	/* an HTML page in site/, as configui writes it next to site/pages/<name>.md */
+	/* an HTML page in site/, as configui writes it next to site/<name>.md */
 	function isHtmlPage(path) {
 		const match = HTML_PATH.exec(path);
 		return !!match && PAGE_NAME.test(match[1]);
@@ -37,7 +37,7 @@
 		return isPage(path) || isHtmlPage(path) || path === CUSTOM_SCRIPT;
 	}
 
-	/* site/pages/<name>.md -> site/<name>.html */
+	/* site/<name>.md -> site/<name>.html */
 	function htmlPath(page) {
 		return 'site/' + page.slice(PAGES_DIR.length).replace(/\.md$/i, '') + '.html';
 	}
@@ -115,7 +115,7 @@
 		const top = tops[0];
 		if (!top || tops.some((t) => t !== top)) return (p) => p;
 		// paths that already have the instance layout keep it
-		if (paths.every((p) => /^(sources|inbox)\/[^/]+$/i.test(p) || /^site\/pages\/[^/]+$/i.test(p))) return (p) => p;
+		if (paths.every((p) => /^(sources|inbox)\/[^/]+$/i.test(p) || /^site\/[^/]+$/i.test(p))) return (p) => p;
 		return (p) => p.slice(top.length + 1);
 	}
 

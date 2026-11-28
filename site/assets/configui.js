@@ -1744,12 +1744,12 @@
 		return refProblems(catRefs, placeRefs);
 	}
 
-	/* ---------- pages (site/pages/*.md and site/<name>.html) ---------- */
+	/* ---------- pages (site/<name>.md and site/<name>.html) ---------- */
 
 	/* The editor of markdown-pages.js (assets/vendor/markdown-pages-editor/)
 	   with a preview rendered like a markdown-pages.js site. Without a loaded
 	   instance the page is a draft in localStorage that can be downloaded;
-	   with one, it edits site/pages/<name>.md there and writes site/<name>.html. */
+	   with one, it edits site/<name>.md there and writes site/<name>.html. */
 	const PAGES_PAGE = 'pages';
 	const PAGE_TOOLBAR = ['bold', 'italic', 'heading', '|', 'link', 'list', 'numbered', 'quote', '|', 'rule'];
 
@@ -1759,7 +1759,7 @@
 		root.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]').forEach((heading) => heading.removeAttribute('id'));
 	}
 
-	/* The instance gets each page twice: site/pages/<name>.md stays the
+	/* The instance gets each page twice: site/<name>.md stays the
 	   source the config UI edits, site/<name>.html is what the site serves.
 	   The HTML is rendered like the preview and wrapped in the frame of the
 	   core's static pages (web/templates/layout.html): its styles,
@@ -1821,7 +1821,7 @@
 		});
 	}
 
-	/* saves site/pages/<name>.md and the HTML made from it */
+	/* saves site/<name>.md and the HTML made from it */
 	function savePage(path, markdown) {
 		WS.saveText(path, markdown);
 		return instancePage(markdown).then((html) => {
@@ -2072,7 +2072,7 @@
 			}, 'cfg-button cfg-primary'),
 			button('Download Markdown', () => {
 				editor.download(name() || 'page');
-				status.textContent = 'Downloaded ' + (name() || 'page') + '.md; keep it in site/pages/ to edit the page again.';
+				status.textContent = 'Downloaded ' + (name() || 'page') + '.md; keep it next to the HTML in site/ to edit the page again.';
 			}),
 			button('Import a file…', () => fileInput.click()),
 			button('Start over', () => {
@@ -2102,7 +2102,7 @@
 	/* ---------- imprint and privacy policy (#20) ---------- */
 
 	/* German templates for site/impressum.html and datenschutz.html (text in
-	   site/pages/), built from a few fields. They describe what the openLitfass front end does
+	   site/<name>.md), built from a few fields. They describe what the openLitfass front end does
 	   (web/js: no cookies, settings in localStorage, map tiles and event
 	   images only on request); everything else is up to the instance. */
 	const LEGAL_PAGE = 'legal';
@@ -2262,7 +2262,7 @@
 
 		function downloadMarkdown(stem) {
 			downloadBlob(new Blob([pages()[stem]], { type: 'text/markdown;charset=utf-8' }), stem + '.md');
-			status.textContent = 'Downloaded ' + stem + '.md; keep it in site/pages/ to edit the page on the Pages page.';
+			status.textContent = 'Downloaded ' + stem + '.md; keep it next to the HTML in site/ to edit the page on the Pages page.';
 		}
 
 		Object.keys(LEGAL_URLS).forEach((stem) => {
@@ -2324,14 +2324,12 @@
 
 	/* ---------- start page: load, check and download the instance ---------- */
 
-	const EDIT_PAGES = { 'instance.json': 'instance', 'categories.json': 'categories', 'places.json': 'places', 'holidays.json': 'holidays', 'sources/': 'source', 'inbox/': 'inbox', 'site/pages/': PAGES_PAGE };
+	const EDIT_PAGES = { 'instance.json': 'instance', 'categories.json': 'categories', 'places.json': 'places', 'holidays.json': 'holidays', 'sources/': 'source', 'inbox/': 'inbox' };
 
 	function editLink(path) {
 		if (EDIT_PAGES[path]) return '?page=' + EDIT_PAGES[path];
-		if (WS.isHtmlPage(path)) {
-			const source = WS.PAGES_DIR + path.slice('site/'.length).replace(/\.html$/i, '.md');
-			return WS.has(source) ? editLink(source) : '';
-		}
+		const page = WS.isHtmlPage(path) ? path.replace(/\.html$/i, '.md') : path;
+		if (WS.isPage(page)) return WS.has(page) ? '?page=' + PAGES_PAGE + '&file=' + encodeURIComponent(page) : '';
 		const folder = Object.keys(EDIT_PAGES).find((key) => key.slice(-1) === '/' && path.indexOf(key) === 0 && path.indexOf('/', key.length) < 0);
 		return folder ? '?page=' + EDIT_PAGES[folder] + '&file=' + encodeURIComponent(path) : '';
 	}
