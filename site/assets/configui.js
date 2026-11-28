@@ -1835,16 +1835,42 @@
 	   gives (edited by hand, or made from another text or version). Checked
 	   once when an instance is loaded: afterwards the config UI writes the
 	   HTML itself, and a difference would only reflect the user's own
-	   changes. A plain comparison until markdown-pages-editor#5. */
+	   changes.
+	   With markdownPagesEditor.compareHtml (markdown-pages-editor#5) the
+	   files are compared by content, so formatting (line endings,
+	   whitespace, attribute order …) does not count, and the result says
+	   whether the text differs or only the frame (title, head: made with
+	   other settings or another version of the config UI). Older editors
+	   get a plain comparison, which cannot tell the two apart. */
 	const PAGES_CHECK_KEY = 'ol-config-pages-check';
 
+	/* { same, text, frame, at } of a page's HTML against what its Markdown
+	   gives; text and frame are null when only a plain comparison was made */
+	function comparePage(expected, html) {
+		const compare = window.markdownPagesEditor && window.markdownPagesEditor.compareHtml;
+		if (typeof compare !== 'function') {
+			const same = String(expected).replace(/\r\n?/g, '\n') === String(html).replace(/\r\n?/g, '\n');
+			return { same: same, text: null, frame: null, at: null };
+		}
+		const result = compare(expected, html);
+		const body = result.differences.find((d) => d.part === 'body') || null;
+		return {
+			same: result.same,
+			text: Boolean(body),
+			frame: result.differences.some((d) => d.part !== 'body'),
+			at: body ? { path: body.path, expected: body.expected, actual: body.actual } : null,
+		};
+	}
+
 	function checkPagesAtLoad() {
-		const same = (a, b) => String(a).replace(/\r\n?/g, '\n') === String(b).replace(/\r\n?/g, '\n');
 		const loaded = WS.loadedAt();
 		return Promise.all(WS.pages().map((path) => {
 			const html = WS.text(WS.htmlPath(path));
 			if (html === null) return { path: path, missing: true };
-			return instancePage(WS.text(path) || '').then((expected) => (same(html, expected) ? null : { path: path, missing: false }));
+			return instancePage(WS.text(path) || '').then((expected) => {
+				const result = comparePage(expected, html);
+				return result.same ? null : { path: path, missing: false, text: result.text, frame: result.frame, at: result.at };
+			});
 		})).then((list) => {
 			try { localStorage.setItem(PAGES_CHECK_KEY, JSON.stringify({ loaded: loaded, pages: list.filter(Boolean) })); } catch (e) {}
 		});
@@ -1864,7 +1890,16 @@
 	}
 
 	function pageCheckText(p) {
-		return p.missing ? 'is missing; it is written when the page is saved.' : 'does not match ' + p.path + ' (edited by hand, or made from another text or version).';
+		if (p.missing) return 'is missing; it is written when the page is saved.';
+		// a plain comparison (older editor, or a result stored before) cannot say more
+		if (typeof p.text !== 'boolean') return 'does not match ' + p.path + ' (edited by hand, or made from another text or version).';
+		if (!p.text) return 'has the text of ' + p.path + ', but another frame (title, styles or scripts – made with other settings or another version).';
+		const quote = (text) => '“' + text + '”';
+		const at = p.at && (p.at.expected !== null || p.at.actual !== null)
+			? ' First difference' + (p.at.path ? ' in ' + p.at.path : '') + ': '
+				+ (p.at.actual === null ? quote(p.at.expected) + ' is missing' : p.at.expected === null ? 'additional ' + quote(p.at.actual) : quote(p.at.actual) + ' instead of ' + quote(p.at.expected)) + '.'
+			: '';
+		return 'does not match the text of ' + p.path + ' (edited by hand, or made from another text)' + (p.frame ? ', and its frame differs too' : '') + '.' + at;
 	}
 
 	function setUpPages(box) {
