@@ -1,0 +1,72 @@
+{
+  "label": "infomax-Veranstaltungswidget",
+  "description": "Event widget by infomax websolutions, used for example by the Mecklenburg-Western Pomerania tourism board (tmvwhl.infomaxnet.de). The parameters are in the widget URL: https://<host>/<permalink>/?widgetToken=<widgetToken>.",
+  "params": {
+    "host": {
+      "label": "Host",
+      "description": "Host name of the widget URL.",
+      "required": true,
+      "example": "tmvwhl.infomaxnet.de"
+    },
+    "permalink": {
+      "label": "Permalink",
+      "description": "First path segment of the widget URL.",
+      "required": true,
+      "example": "stadt-stralsund-de"
+    },
+    "widgetToken": {
+      "label": "Widget-Token",
+      "description": "Value of the widgetToken query parameter.",
+      "required": true,
+      "example": "4YRcdHbzey0."
+    },
+    "language": {
+      "label": "Sprache",
+      "description": "Language of the entries.",
+      "default": "de"
+    }
+  },
+  "source": {
+    "type": "html",
+    "homepage": "https://{host}/{permalink}/?widgetToken={widgetToken}",
+    "daysAhead": 14,
+    "timeoutSeconds": 180,
+    "requestDelaySeconds": 5,
+    "categorySeparator": ", ",
+    "categoryAttributes": {
+      "Kinder": { "familyFriendly": true }
+    },
+    "steps": [
+      {
+        "url": "https://{host}/{permalink}/?widgetToken={widgetToken}&form=search&searchType=search&dateFrom={today}&dateTo={until}",
+        "collect": {
+          "ids": { "selector": "[data-idents]", "attr": "data-idents", "split": "," }
+        }
+      }
+    ],
+    "url": "https://{host}/{permalink}/{language}/action/items?widgetToken={widgetToken}&outputType=itemsPage&layout=listitem&showDate=1",
+    "forEach": { "var": "ids", "param": "object[]", "batch": 100 },
+    "itemSelector": "article[data-ident]",
+    "extract": {
+      "id": { "attr": "data-ident" },
+      "title": ".-IMXEVNT-seoTitle",
+      "category": ".-IMXEVNT-listElement__text__subline",
+      "date": { "selector": ".-IMXEVNT-listElement__text__info", "regex": "^(\\d{2}\\.\\d{2}\\.\\d{4})" },
+      "start": { "selector": ".-IMXEVNT-listElement__text__info", "regex": "/\\s*(\\d{1,2}:\\d{2})" },
+      "end": { "selector": ".-IMXEVNT-listElement__text__info", "regex": "\\d:\\d{2}\\s*-\\s*(\\d{1,2}:\\d{2})" },
+      "place": { "selector": ".-IMXEVNT-listElement__text__info", "regex": "/\\s*([^/]+)$" },
+      "description": ".-IMXEVNT-listElement__text__extended p",
+      "link": { "selector": "h2 a", "attr": "href" }
+    },
+    "mapping": {
+      "sourceId": { "path": "id" },
+      "title": { "path": "title" },
+      "category": { "path": "category" },
+      "description": { "path": "description" },
+      "url": { "path": "link" },
+      "locationName": { "path": "place" },
+      "start": { "template": "{date} {start}", "format": "02.01.2006 15:04|02.01.2006" },
+      "end": { "template": "{date} {end}", "format": "02.01.2006 15:04" }
+    }
+  }
+}

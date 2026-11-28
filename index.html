@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<!-- Scripts, styles and images from this site only. Data may come from any
+	     https:// server, because "Load from a git repository" reads from
+	     self-hosted GitLab and Forgejo servers that are not known in advance;
+	     a meta policy cannot be widened later by script. The forms have no
+	     action: they are never sent, the files are built in the browser. -->
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https:; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+	<meta name="referrer" content="strict-origin-when-cross-origin">
+	<title>openLitfass config</title>
+	<meta name="description" content="Build the configuration files of an openLitfass instance in the browser: instance.json, categories, places, holidays, inbox events and sources.">
+	<meta name="theme-color" content="#2F3E4E">
+	<link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+	<link rel="icon" href="assets/img/favicon-32.png" type="image/png" sizes="32x32">
+	<link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+	<link rel="stylesheet" href="assets/vendor/markdown-pages-editor/markdown-pages-editor.css">
+	<link rel="stylesheet" href="assets/configui.css">
+	<script src="markdown-pages.js"></script>
+	<script src="assets/vendor/markdown-pages-editor/markdown-pages-editor.js"></script>
+	<script src="assets/setup.js"></script>
+</head>
+
+<body>
+	<a class="skip-link" href="#main">Skip to content</a>
+	<div class="topbar">
+		<button type="button" class="menu-toggle" aria-controls="sidebar" aria-expanded="false">Menu</button>
+		<a class="topbar-brand" href=".">openLitfass <span>config</span></a>
+	</div>
+	<header id="sidebar"></header>
+	<main id="main" tabindex="-1"><p class="loading">Loading…</p></main>
+	<footer></footer>
+	<noscript>
+		<p class="noscript">The config UI builds the files in the browser and needs JavaScript. The file formats are described in the
+		<a href="https://docs.openlitfass.org/?page=configuration">documentation</a>.</p>
+	</noscript>
+	<script src="assets/shell.js"></script>
+	<script src="assets/workspace.js"></script>
+	<script src="assets/repo.js"></script>
+	<script src="assets/iconpicker.js"></script>
+	<script src="assets/configui.js"></script>
+</body>
+</html>
